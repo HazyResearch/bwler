@@ -1,0 +1,8 @@
+einops==0.8.0
+jupytext==1.16.5
+matplotlib==3.10.0
+numpy==2.2.0
+scipy==1.15.1
+torch==2.3.0
+tqdm==4.67.1
+wandb==0.19.4
