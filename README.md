@@ -1,17 +1,58 @@
-![BWLer: Barycentric Weight Layer Elucidates a Precision-Conditioning Tradeoff for PINNs](assets/banner.png)
+<div align="center">
+  <img src="assets/banner.png" alt="BWLer banner" height="300"/>
 
-# BWLer: Barycentric Weight Layer Elucidates a Precision-Conditioning Tradeoff for PINNs
+  <br/>
 
-This repository contains code for the following paper:
+  <a href="LICENSE">
+    <img src="https://img.shields.io/github/license/HazyResearch/bwler" alt="License"/>
+  </a>
+  <a href="https://arxiv.org/abs/2506.23024">
+    <img src="https://img.shields.io/badge/arXiv-2506.23024-b31b1b.svg" alt="arXiv"/>
+  </a>
+</div>
 
-> **BWLer: Barycentric Weight Layer Elucidates a Precision-Conditioning Tradeoff for PINNs.**
->
-> Jerry Liu, Yasa Baig, Denise Hui Jean Lee, Rajat Vadiraj Dwaraknath, Atri Rudra, Chris Ré.
-> 
-> Workshop on the Theory of AI for Scientific Computing (TASC) @ COLT 2025 [Best Paper Award].  
-> [[Paper]](https://openreview.net/forum?id=rKZkotB0um)
+<h1 align="center">BWLer: Barycentric Weight Layer Elucidates a Precision-Conditioning Tradeoff for PINNs</h1>
 
-![Standard PINN evaluates an MLP throughout the domain (left). BWLer interpolates globally based on values at discrete grid nodes; BWLERhatted MLP obtains values using an MLP (middle), explicit BWLer parameterizes values directly (right).](assets/method.png)
+<p align="center">
+  This repository contains code for the following paper:
+</p>
+
+<blockquote align="center">
+  <b>BWLer: Barycentric Weight Layer Elucidates a Precision-Conditioning Tradeoff for PINNs</b><br/>
+  Jerry Liu, Yasa Baig, Denise Hui Jean Lee, Rajat Vadiraj Dwaraknath, Atri Rudra, Chris Ré.<br/>
+  <b>Best Paper Award</b> at the <i>Workshop on the Theory of AI for Scientific Computing (TASC) @ COLT 2025</i><br/>
+  <small><a href="https://arxiv.org/abs/2506.23024"><em>[Read the paper]</em></a></small>
+</blockquote>
+
+<div style="margin-top: 0.75em;"></div>
+
+<p>
+  <b>BWLer</b> replaces or augments physics-informed neural networks with <i>barycentric polynomial interpolants</i>, towards higher-precision solutions to partial differential equations. BWLer comes in two variants:
+</p>
+
+<ul>
+  <li><b>BWLer-hatted MLP:</b> adds a global interpolation layer on top of an existing neural network architecture.</li>
+  <li><b>Explicit BWLer:</b> removes the neural network entirely, and instead directly optimizes the function values at BWLer's interpolation nodes.</li>
+</ul>
+
+
+<p>
+  See our accompanying blog posts for more details:
+  <ul>
+    <li><a href="https://hazyresearch.stanford.edu/blog/2025-07-07-bwler-p1">Part 1: PDEs, PINNs, and the Precision Gap</a></li>
+    <li><a href="https://hazyresearch.stanford.edu/blog/2025-07-07-bwler-p2">Part 2: Navigating a Precision–Conditioning Tradeoff for PINNs</a></li>
+  </ul>
+</p>
+
+
+<div align="center">
+  <img src="assets/method.png" alt="Method overview" height="300"/>
+
+  <p style="max-width: 700px; margin-top: 0.5em;">
+    <i>Figure:</i> Standard PINN evaluates an MLP throughout the domain (left). <b>BWLer</b> interpolates globally based on values at discrete grid nodes; <b>BWLer-hatted MLP</b> obtains values using an MLP (middle), <b>explicit BWLer</b> parameterizes values directly (right).
+  </p>
+</div>
+
 
 
 ## Dependencies
@@ -46,13 +87,15 @@ The code is organized as follows:
 ## Citation
 If you find this work useful, please cite it as follows:
 ```
-@inproceedings{
-liu2025bwler,
-title={{BWL}er: Barycentric Weight Layer Elucidates a Precision-Conditioning Tradeoff for {PINN}s},
-author={Jerry Weihong Liu and Yasa Baig and Denise Hui Jean Lee and Rajat Vadiraj Dwaraknath and Atri Rudra and Christopher Re},
-booktitle={Workshop on the Theory of AI for Scientific Computing},
-year={2025},
-url={https://openreview.net/forum?id=rKZkotB0um}
+@misc{liu2025bwlerbarycentricweightlayer,
+  title={BWLer: Barycentric Weight Layer Elucidates a Precision-Conditioning Tradeoff for PINNs}, 
+  author={Jerry Liu and Yasa Baig and Denise Hui Jean Lee and Rajat Vadiraj Dwaraknath and Atri Rudra and Chris Ré},
+  year={2025},
+  eprint={2506.23024},
+  archivePrefix={arXiv},
+  primaryClass={cs.LG},
+  note={Presented at the Workshop on the Theory of AI for Scientific Computing (TASC) @ COLT 2025},
+  url={https://arxiv.org/abs/2506.23024}
 }
 ```
 
