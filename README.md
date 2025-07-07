@@ -3,9 +3,9 @@
 
   <br/>
 
-  <a href="LICENSE">
+  <!-- <a href="LICENSE">
     <img src="https://img.shields.io/github/license/HazyResearch/bwler" alt="License"/>
-  </a>
+  </a> -->
   <a href="https://arxiv.org/abs/2506.23024">
     <img src="https://img.shields.io/badge/arXiv-2506.23024-b31b1b.svg" alt="arXiv"/>
   </a>
