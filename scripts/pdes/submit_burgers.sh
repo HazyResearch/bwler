@@ -3,7 +3,7 @@
 conda init && conda activate bwler
 
 DEVICE="0"
-N_EPOCHS=1000000
+N_EPOCHS=1000
 N_T=321
 N_X=321
 
@@ -14,5 +14,12 @@ CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers -
 # Explicit BWLer, Adam
 CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t $N_T --n_x $N_X --n_epochs $N_EPOCHS --method adam --sample_type standard --model polynomial --eval_every 1000
 
+# MLP, SSBroyden
+CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_layers 3 --hidden_dim 64 --activation tanh --n_epochs 1000 --method ssbroyden --sample_type standard --model mlp --eval_every 50
+# BWLer-hatted MLP, SSBroyden
+CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 81 --n_x 81 --n_layers 3 --hidden_dim 64 --activation tanh --n_epochs 1000 --method ssbroyden --sample_type standard --model mlpinterp --eval_every 50
+# Explicit BWLer, SSBroyden
+CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 81 --n_x 81 --n_epochs 1000 --method ssbroyden --sample_type standard --model polynomial --eval_every 50
+
 # High-precision explicit BWLer
-CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 321 --n_x 321 --n_epochs 850 --method nys_newton --sample_type standard --model polynomial_fd --eval_every 10 --from_pretrained --nncg_rank 1000 --nncg_cgmaxiters 2000 --fd_k 1
+#CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 321 --n_x 321 --n_epochs 850 --method nys_newton --sample_type standard --model polynomial_fd --eval_every 10 --from_pretrained --nncg_rank 1000 --nncg_cgmaxiters 2000 --fd_k 1

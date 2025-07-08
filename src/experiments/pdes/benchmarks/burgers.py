@@ -370,8 +370,12 @@ if __name__ == "__main__":
         loss_weight_update_interval=args.loss_weight_update_interval,
     )
 
-    base_save_dir = (
-        f"PATH/TO/interpolants-torch/plots/pdes/burgers/nu={nu}_tfinal={args.t_final}"
+    base_save_dir = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "..",
+        "plots/pdes/burgers/nu={nu}_tfinal={args.t_final}",
     )
 
     # Add timestamp to base save directory
@@ -424,6 +428,17 @@ if __name__ == "__main__":
                 mu=1e-2,
                 cg_tol=1e-16,
                 line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model_mlp.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
             )
         else:
             optimizer = pde.get_optimizer(model_mlp, args.method)
@@ -509,6 +524,17 @@ if __name__ == "__main__":
                 cg_tol=1e-16,
                 line_search_fn="armijo",
             )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
         else:
             optimizer = pde.get_optimizer(model, args.method)
 
@@ -593,6 +619,17 @@ if __name__ == "__main__":
                 mu=1e-2,
                 cg_tol=1e-16,
                 line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
             )
         else:
             optimizer = pde.get_optimizer(model, args.method)
@@ -683,6 +720,17 @@ if __name__ == "__main__":
                 mu=1e-2,
                 cg_tol=1e-16,
                 line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
             )
         else:
             optimizer = pde.get_optimizer(model, args.method)
