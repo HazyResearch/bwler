@@ -369,8 +369,19 @@ if __name__ == "__main__":
 
         # Training setup
         n_epochs = args.n_epochs
-        optimizer = torch.optim.Adam(model_mlp.parameters(), lr=args.lr_max)
-        optimizer = pde.get_optimizer(model_mlp, args.method)
+        if args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model_mlp.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        else:
+            optimizer = pde.get_optimizer(model_mlp, args.method)
 
         n_t_train = 161
         n_x_train = 161
@@ -455,6 +466,18 @@ if __name__ == "__main__":
                 cg_tol=1e-16,
                 line_search_fn="armijo",
             )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+
         else:
             optimizer = pde.get_optimizer(model, args.method)
 
@@ -546,6 +569,17 @@ if __name__ == "__main__":
                 cg_tol=1e-16,
                 line_search_fn="armijo",
             )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )  
         else:
             optimizer = pde.get_optimizer(model, args.method)
 

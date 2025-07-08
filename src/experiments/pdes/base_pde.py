@@ -8,6 +8,7 @@ from typing import List, Tuple, Callable
 import numpy as np
 
 from src.optimizers.nys_newton_cg import NysNewtonCG
+from src.optimizers.ssbroyden import SSBroyden2
 from src.utils.pyhessian import HessianAnalyzer
 
 from src.experiments.base_fcn import BaseFcn
@@ -909,6 +910,181 @@ class BasePDE(BaseFcn):
                     plt.show()
                 plt.close()
 
+    def train_model_ssbroyden(
+        self,
+        model: nn.Module,
+        n_epochs: int,
+        optimizer: SSBroyden2,
+        pde_sampler: Callable,
+        ic_sampler: Callable,
+        ic_weight: float,
+        eval_sampler: Callable,
+        eval_metrics: List[Callable],
+        *,
+        eval_every: int = 100,
+        save_dir: str | None = None,
+        logger: Logger | None = None,
+        hessian_every: int = -1,
+        hessian_num_iter: int = 100,
+        hessian_num_run: int = 1,
+        n_square_boundary: int = 0,
+    ):
+        """
+        Train **only** with the dense Self-Scaled Broyden-II optimiser that lives
+        in `ssbroyden2_optimizer.py`.  Mirrors the signature & behaviour of
+        `train_model_lbfgs` so it fits seamlessly into existing scripts.
+        """
+
+        if logger is None:
+            logger = Logger(path=os.path.join(save_dir, "logger.json"))
+
+        # Sample points once since Newton methods work better with fixed points
+        pde_nodes = pde_sampler()
+        ic_nodes = ic_sampler()
+        eval_nodes = eval_sampler()
+
+        start_time = time()
+
+        def closure():
+            optimizer.zero_grad()
+            loss, *_ = self.get_pde_loss(
+                model,
+                pde_nodes,
+                ic_nodes,
+                ic_weight,
+                n_square_boundary=n_square_boundary,
+            )
+            loss.backward()
+            return loss
+        
+        for epoch in tqdm(range(n_epochs)):
+            # Optimize
+            loss = optimizer.step(closure)
+
+            self.update_loss_weights(epoch, model, optimizer, pde_nodes, ic_nodes)
+
+            logger.log("loss", loss.item(), epoch)
+
+
+            if (epoch + 1) % eval_every == 0:
+
+                # Save checkpoint
+                if save_dir is not None:
+                    torch.save(
+                        model.state_dict(),
+                        os.path.join(save_dir, f"checkpoint_{epoch}.pth"),
+                    )
+
+                # Evaluate solution
+                with torch.no_grad():
+                    u_eval = model(eval_nodes)
+                    u_true = self.get_solution(eval_nodes)
+
+                    # Calculate metrics
+                    metrics_values = {}
+                    for eval_metric in eval_metrics:
+                        eval_metric_value = eval_metric(u_eval, u_true)
+                        metrics_values[eval_metric.__name__] = eval_metric_value
+                        logger.log(
+                            f"eval_{eval_metric.__name__}", eval_metric_value, epoch
+                        )
+                with torch.enable_grad():
+                    # Get losses for history
+                    _, pde_loss, ic_loss = self.get_pde_loss(
+                        model,
+                        pde_nodes,
+                        ic_nodes,
+                        ic_weight,
+                        n_square_boundary=n_square_boundary,
+                    )
+                    _, eval_pde_loss, _ = self.get_pde_loss(
+                        model,
+                        eval_nodes,
+                        ic_nodes,
+                        ic_weight,
+                        n_square_boundary=n_square_boundary,
+                    )
+                    logger.log("train_pde_loss", pde_loss.item(), epoch)
+                    logger.log("train_ic_loss", ic_loss.item(), epoch)
+                    logger.log("eval_pde_loss", eval_pde_loss.item(), epoch)
+
+                current_time = time() - start_time
+                print(f"Epoch {epoch + 1} completed in {current_time:.2f} seconds")
+                print(
+                    f"PDE loss: {logger.get_most_recent_value('train_pde_loss'):1.3e}"
+                )
+                print(f"IC loss: {logger.get_most_recent_value('train_ic_loss'):1.3e}")
+                print(
+                    f"Evaluation L2 error: {logger.get_most_recent_value('eval_l2_error'):1.3e}"
+                )
+                print(
+                    f"Evaluation L2 relative error: {logger.get_most_recent_value('eval_l2_relative_error'):1.3e}"
+                )
+                if self.__class__.__name__ == "Poisson2DCG":
+                    self.plot_solution(
+                        model,
+                        eval_nodes,
+                        u_eval,
+                        save_path=(
+                            os.path.join(save_dir, f"{self.name}_solution_{epoch}.png")
+                            if save_dir is not None
+                            else None
+                        ),
+                    )
+                else:
+                    self.plot_solution(
+                        eval_nodes,
+                        u_eval,
+                        save_path=os.path.join(
+                            save_dir, f"{self.name}_solution_{epoch}.png"
+                        ),
+                    )
+
+                # Save history
+                logger.save()
+
+                # Plot loss history
+                plt.figure()
+                plt.semilogy(
+                    logger.get_iters("loss"), logger.get_values("loss"), label="Loss"
+                )
+                plt.semilogy(
+                    logger.get_iters("train_pde_loss"),
+                    logger.get_values("train_pde_loss"),
+                    label="Train PDE Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("train_ic_loss"),
+                    logger.get_values("train_ic_loss"),
+                    label="Train IC Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_pde_loss"),
+                    logger.get_values("eval_pde_loss"),
+                    label="Eval PDE Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_l2_error"),
+                    logger.get_values("eval_l2_error"),
+                    label="Eval L2 Error",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_max_error"),
+                    logger.get_values("eval_max_error"),
+                    label="Eval Max Error",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_l2_relative_error"),
+                    logger.get_values("eval_l2_relative_error"),
+                    label="Eval L2 Relative Error",
+                )
+                plt.legend()
+                if save_dir is not None:
+                    plt.savefig(os.path.join(save_dir, "loss_history.png"))
+                else:
+                    plt.show()
+                plt.close()
+
     # Optimizes with Adam for n_adam_epochs, then optimizes with NysNewtonCG for n_nys_newton_epochs
     def train_model_alternating(
         self,
@@ -1163,6 +1339,26 @@ class BasePDE(BaseFcn):
                 eval_every,
                 save_dir,
                 logger,
+                hessian_every=hessian_every,
+                hessian_num_iter=hessian_num_iter,
+                hessian_num_run=hessian_num_run,
+                n_square_boundary=kwargs.get(
+                    "n_square_boundary", 0
+                ),  # Pass through n_square_boundary
+            )
+        elif isinstance(optimizer, SSBroyden2):
+            self.train_model_ssbroyden(
+                model,
+                n_epochs,
+                optimizer,
+                pde_sampler,
+                ic_sampler,
+                ic_weight,
+                eval_sampler,
+                eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
                 hessian_every=hessian_every,
                 hessian_num_iter=hessian_num_iter,
                 hessian_num_run=hessian_num_run,
