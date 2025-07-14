@@ -9,6 +9,7 @@ import numpy as np
 
 from src.optimizers.nys_newton_cg import NysNewtonCG
 from src.optimizers.ssbroyden import SSBroyden2
+from src.optimizers.Lssbroyden import L_SSBroyden
 from src.utils.pyhessian import HessianAnalyzer
 
 from src.experiments.base_fcn import BaseFcn
@@ -1085,6 +1086,460 @@ class BasePDE(BaseFcn):
                     plt.show()
                 plt.close()
 
+    def train_model_Lssbroyden(
+        self,
+        model: nn.Module,
+        n_epochs: int,
+        optimizer: L_SSBroyden,
+        pde_sampler: Callable,
+        ic_sampler: Callable,
+        ic_weight: float,
+        eval_sampler: Callable,
+        eval_metrics: List[Callable],
+        *,
+        eval_every: int = 100,
+        save_dir: str | None = None,
+        logger: Logger | None = None,
+        hessian_every: int = -1,
+        hessian_num_iter: int = 100,
+        hessian_num_run: int = 1,
+        n_square_boundary: int = 0,
+    ):
+        """
+        Train with the Limited-memory Self-Scaled Broyden optimizer.
+        Mirrors the signature & behaviour of train_model_ssbroyden to fit 
+        seamlessly into existing scripts.
+        """
+
+        if logger is None:
+            logger = Logger(path=os.path.join(save_dir, "logger.json"))
+
+        # Sample points once since Newton methods work better with fixed points
+        pde_nodes = pde_sampler()
+        ic_nodes = ic_sampler()
+        eval_nodes = eval_sampler()
+
+        start_time = time()
+
+        def closure():
+            optimizer.zero_grad()
+            loss, *_ = self.get_pde_loss(
+                model,
+                pde_nodes,
+                ic_nodes,
+                ic_weight,
+                n_square_boundary=n_square_boundary,
+            )
+            loss.backward()
+            return loss
+        
+        for epoch in tqdm(range(n_epochs)):
+            # Optimize
+            loss = optimizer.step(closure)
+
+            self.update_loss_weights(epoch, model, optimizer, pde_nodes, ic_nodes)
+
+            logger.log("loss", loss.item(), epoch)
+
+            if (epoch + 1) % eval_every == 0:
+
+                # Save checkpoint
+                if save_dir is not None:
+                    torch.save(
+                        model.state_dict(),
+                        os.path.join(save_dir, f"checkpoint_{epoch}.pth"),
+                    )
+
+                # Evaluate solution
+                with torch.no_grad():
+                    u_eval = model(eval_nodes)
+                    u_true = self.get_solution(eval_nodes)
+
+                    # Calculate metrics
+                    metrics_values = {}
+                    for eval_metric in eval_metrics:
+                        eval_metric_value = eval_metric(u_eval, u_true)
+                        metrics_values[eval_metric.__name__] = eval_metric_value
+                        logger.log(
+                            f"eval_{eval_metric.__name__}", eval_metric_value, epoch
+                        )
+                with torch.enable_grad():
+                    # Get losses for history
+                    _, pde_loss, ic_loss = self.get_pde_loss(
+                        model,
+                        pde_nodes,
+                        ic_nodes,
+                        ic_weight,
+                        n_square_boundary=n_square_boundary,
+                    )
+                    _, eval_pde_loss, _ = self.get_pde_loss(
+                        model,
+                        eval_nodes,
+                        ic_nodes,
+                        ic_weight,
+                        n_square_boundary=n_square_boundary,
+                    )
+                    logger.log("train_pde_loss", pde_loss.item(), epoch)
+                    logger.log("train_ic_loss", ic_loss.item(), epoch)
+                    logger.log("eval_pde_loss", eval_pde_loss.item(), epoch)
+
+                current_time = time() - start_time
+                print(f"Epoch {epoch + 1} completed in {current_time:.2f} seconds")
+                print(
+                    f"PDE loss: {logger.get_most_recent_value('train_pde_loss'):1.3e}"
+                )
+                print(f"IC loss: {logger.get_most_recent_value('train_ic_loss'):1.3e}")
+                print(
+                    f"Evaluation L2 error: {logger.get_most_recent_value('eval_l2_error'):1.3e}"
+                )
+                print(
+                    f"Evaluation L2 relative error: {logger.get_most_recent_value('eval_l2_relative_error'):1.3e}"
+                )
+                if self.__class__.__name__ == "Poisson2DCG":
+                    self.plot_solution(
+                        model,
+                        eval_nodes,
+                        u_eval,
+                        save_path=(
+                            os.path.join(save_dir, f"{self.name}_solution_{epoch}.png")
+                            if save_dir is not None
+                            else None
+                        ),
+                    )
+                else:
+                    self.plot_solution(
+                        eval_nodes,
+                        u_eval,
+                        save_path=os.path.join(
+                            save_dir, f"{self.name}_solution_{epoch}.png"
+                        ),
+                    )
+
+                # Save history
+                logger.save()
+
+                # Plot loss history
+                plt.figure()
+                plt.semilogy(
+                    logger.get_iters("loss"), logger.get_values("loss"), label="Loss"
+                )
+                plt.semilogy(
+                    logger.get_iters("train_pde_loss"),
+                    logger.get_values("train_pde_loss"),
+                    label="Train PDE Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("train_ic_loss"),
+                    logger.get_values("train_ic_loss"),
+                    label="Train IC Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_pde_loss"),
+                    logger.get_values("eval_pde_loss"),
+                    label="Eval PDE Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_l2_error"),
+                    logger.get_values("eval_l2_error"),
+                    label="Eval L2 Error",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_max_error"),
+                    logger.get_values("eval_max_error"),
+                    label="Eval Max Error",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_l2_relative_error"),
+                    logger.get_values("eval_l2_relative_error"),
+                    label="Eval L2 Relative Error",
+                )
+                plt.legend()
+                if save_dir is not None:
+                    plt.savefig(os.path.join(save_dir, "loss_history.png"))
+                else:
+                    plt.show()
+                plt.close()
+
+    def train_adam_ssbroyden(
+        self,
+        model: nn.Module,
+        n_epochs: int,
+        pde_sampler: Callable,
+        ic_sampler: Callable,
+        ic_weight: float,
+        eval_sampler: Callable,
+        eval_metrics: List[Callable],
+        *,
+        n_adam_epochs: int = 5000,
+        eval_every: int = 100,
+        save_dir: str | None = None,
+        logger: Logger | None = None,
+        lr_schedule: bool = True,
+        gradient_clip: float = 1.0,
+        hessian_every: int = -1,
+        hessian_num_iter: int = 100,
+        hessian_num_run: int = 1,
+        n_square_boundary: int = 0,
+        **kwargs,
+    ):
+        """
+        Train with Adam for n_adam_epochs, then switch to SSBroyden for the remaining epochs.
+        This provides a good initialization with Adam before switching to the more aggressive SSBroyden.
+        """
+        from src.optimizers.ssbroyden import SSBroyden2
+
+        if logger is None:
+            logger = Logger(path=os.path.join(save_dir, "logger.json"))
+
+        print(f"Training model with Adam ({n_adam_epochs} epochs) + SSBroyden ({n_epochs - n_adam_epochs} epochs)...")
+        
+        # Create optimizers
+        optimizer_adam = self.get_optimizer(model, "adam")
+        optimizer_ssbroyden = SSBroyden2(
+            model.parameters(),
+            lr=1.0,
+            init_scale=True,
+            c1=1e-4,
+            c2=0.9,
+            max_ls=20,
+        )
+
+        # Add learning rate scheduler for Adam if requested
+        if lr_schedule:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer_adam, T_max=n_adam_epochs, eta_min=1e-6
+            )
+        else:
+            scheduler = None
+
+        start_time = time()
+        iter_times = []
+
+        # Sample points once for SSBroyden (will be used after Adam phase)
+        pde_nodes_fixed = pde_sampler()
+        ic_nodes_fixed = ic_sampler()
+        eval_nodes = eval_sampler()
+
+        # Define closure for SSBroyden
+        def ssbroyden_closure():
+            optimizer_ssbroyden.zero_grad()
+            loss, *_ = self.get_pde_loss(
+                model,
+                pde_nodes_fixed,
+                ic_nodes_fixed,
+                ic_weight,
+                n_square_boundary=n_square_boundary,
+            )
+            loss.backward()
+            return loss
+
+        for epoch in tqdm(range(n_epochs)):
+            iter_start_time = time()
+
+            # Phase 1: Adam optimization
+            if epoch < n_adam_epochs:
+                # Sample fresh points for Adam
+                pde_nodes = pde_sampler()
+                ic_nodes = ic_sampler()
+
+                # Update loss weights
+                self.update_loss_weights(epoch, model, optimizer_adam, pde_nodes, ic_nodes)
+
+                # Train step
+                optimizer_adam.zero_grad()
+
+                # Get PDE loss
+                loss, pde_loss, ic_loss = self.get_pde_loss(
+                    model,
+                    pde_nodes,
+                    ic_nodes,
+                    ic_weight,
+                    n_square_boundary=n_square_boundary,
+                )
+
+                # Backprop
+                loss.backward()
+
+                # Gradient clipping if requested
+                if gradient_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), max_norm=gradient_clip
+                    )
+
+                # Update parameters
+                optimizer_adam.step()
+
+                # Update learning rate if using scheduler
+                if scheduler is not None:
+                    scheduler.step()
+                    current_lr = scheduler.get_last_lr()[0]
+                    logger.log("learning_rate", current_lr, epoch)
+
+            # Phase 2: SSBroyden optimization
+            else:
+                # Use fixed points for SSBroyden (better for second-order methods)
+                pde_nodes = pde_nodes_fixed
+                ic_nodes = ic_nodes_fixed
+
+                # Switch message (only print once)
+                if epoch == n_adam_epochs:
+                    print(f"Switching to SSBroyden optimization at epoch {epoch}...")
+
+                # Update loss weights
+                self.update_loss_weights(epoch, model, optimizer_ssbroyden, pde_nodes, ic_nodes)
+
+                # Optimize with SSBroyden
+                loss = optimizer_ssbroyden.step(ssbroyden_closure)
+
+            # Record iteration time
+            iter_time = time() - iter_start_time
+            iter_times.append(iter_time)
+            logger.log("iter_time", iter_time, epoch)
+            logger.log(
+                "avg_iter_time",
+                sum(iter_times[-eval_every:]) / len(iter_times[-eval_every:]),
+                epoch,
+            )
+
+            # Log loss
+            logger.log("loss", loss.item(), epoch)
+
+            # Log which optimizer is being used
+            optimizer_name = "adam" if epoch < n_adam_epochs else "ssbroyden"
+            logger.log("optimizer", optimizer_name, epoch)
+
+            # Evaluate, print, and plot progress
+            if (epoch + 1) % eval_every == 0:
+                # Save checkpoint
+                if save_dir is not None:
+                    torch.save(
+                        model.state_dict(),
+                        os.path.join(save_dir, f"checkpoint_{epoch}.pth"),
+                    )
+
+                # Evaluate solution
+                with torch.no_grad():
+                    u_eval = model(eval_nodes)
+                    u_true = self.get_solution(eval_nodes)
+                    for eval_metric in eval_metrics:
+                        eval_metric_value = eval_metric(u_eval, u_true)
+                        logger.log(
+                            f"eval_{eval_metric.__name__}", eval_metric_value, epoch
+                        )
+
+                # Get losses for history (use current nodes)
+                with torch.enable_grad():
+                    _, pde_loss, ic_loss = self.get_pde_loss(
+                        model,
+                        pde_nodes,
+                        ic_nodes,
+                        ic_weight,
+                        n_square_boundary=n_square_boundary,
+                    )
+                    _, eval_pde_loss, _ = self.get_pde_loss(
+                        model,
+                        eval_nodes,
+                        ic_nodes,
+                        ic_weight,
+                        n_square_boundary=n_square_boundary,
+                    )
+                    logger.log("train_pde_loss", pde_loss.item(), epoch)
+                    logger.log("train_ic_loss", ic_loss.item(), epoch)
+                    logger.log("eval_pde_loss", eval_pde_loss.item(), epoch)
+
+                current_time = time() - start_time
+                optimizer_phase = "Adam" if epoch < n_adam_epochs else "SSBroyden"
+                print(f"Epoch {epoch + 1} ({optimizer_phase}) completed in {current_time:.2f} seconds")
+                print(
+                    f"Average iteration time: {sum(iter_times[-eval_every:]) / len(iter_times[-eval_every:]):.3f} seconds"
+                )
+                print(
+                    f"PDE loss: {logger.get_most_recent_value('train_pde_loss'):1.3e}"
+                )
+                print(f"IC loss: {logger.get_most_recent_value('train_ic_loss'):1.3e}")
+                print(
+                    f"Evaluation L2 error: {logger.get_most_recent_value('eval_l2_error'):1.3e}"
+                )
+                print(
+                    f"Evaluation L2 relative error: {logger.get_most_recent_value('eval_l2_relative_error'):1.3e}"
+                )
+                if scheduler is not None and epoch < n_adam_epochs:
+                    print(f"Learning rate: {current_lr:.2e}")
+
+                # Plot solution
+                if self.__class__.__name__ == "Poisson2DCG":
+                    self.plot_solution(
+                        model,
+                        eval_nodes,
+                        u_eval,
+                        save_path=(
+                            os.path.join(save_dir, f"{self.name}_solution_{epoch}.png")
+                            if save_dir is not None
+                            else None
+                        ),
+                    )
+                else:
+                    self.plot_solution(
+                        eval_nodes,
+                        u_eval,
+                        save_path=os.path.join(
+                            save_dir, f"{self.name}_solution_{epoch}.png"
+                        ),
+                    )
+
+                # Save history
+                logger.save()
+
+                # Plot loss history
+                plt.figure()
+                plt.semilogy(
+                    logger.get_iters("loss"), logger.get_values("loss"), label="Loss"
+                )
+                plt.semilogy(
+                    logger.get_iters("train_pde_loss"),
+                    logger.get_values("train_pde_loss"),
+                    label="Train PDE Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("train_ic_loss"),
+                    logger.get_values("train_ic_loss"),
+                    label="Train IC Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_pde_loss"),
+                    logger.get_values("eval_pde_loss"),
+                    label="Eval PDE Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_l2_error"),
+                    logger.get_values("eval_l2_error"),
+                    label="Eval L2 Error",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_max_error"),
+                    logger.get_values("eval_max_error"),
+                    label="Eval Max Error",
+                )
+                
+                # Add vertical line to show transition from Adam to SSBroyden
+                if n_adam_epochs < n_epochs:
+                    plt.axvline(x=n_adam_epochs, color='red', linestyle='--', alpha=0.7, label='Adam→SSBroyden')
+                
+                plt.legend()
+                if save_dir is not None:
+                    plt.savefig(os.path.join(save_dir, "loss_history.png"))
+                else:
+                    plt.show()
+                plt.close()
+
+        # Log final timing metrics
+        total_time = time() - start_time
+        logger.log("total_runtime", total_time, n_epochs - 1)
+        logger.log("avg_iter_time", sum(iter_times) / len(iter_times), n_epochs - 1)
+        logger.log("min_iter_time", min(iter_times), n_epochs - 1)
+        logger.log("max_iter_time", max(iter_times), n_epochs - 1)
+        logger.save()
+
     # Optimizes with Adam for n_adam_epochs, then optimizes with NysNewtonCG for n_nys_newton_epochs
     def train_model_alternating(
         self,
@@ -1348,6 +1803,26 @@ class BasePDE(BaseFcn):
             )
         elif isinstance(optimizer, SSBroyden2):
             self.train_model_ssbroyden(
+                model,
+                n_epochs,
+                optimizer,
+                pde_sampler,
+                ic_sampler,
+                ic_weight,
+                eval_sampler,
+                eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                hessian_every=hessian_every,
+                hessian_num_iter=hessian_num_iter,
+                hessian_num_run=hessian_num_run,
+                n_square_boundary=kwargs.get(
+                    "n_square_boundary", 0
+                ),  # Pass through n_square_boundary
+            )
+        elif isinstance(optimizer, L_SSBroyden):
+            self.train_model_Lssbroyden(
                 model,
                 n_epochs,
                 optimizer,
