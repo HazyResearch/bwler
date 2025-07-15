@@ -1,6 +1,5 @@
 import torch
 from torch.optim.optimizer import Optimizer
-import math
 from collections import deque
 from typing import Optional, Callable, Tuple
 
@@ -103,15 +102,15 @@ class L_SSBroyden(Optimizer):
                                           history_phi, history_rho, idx-1, gamma)
         y_H_y = y_i.dot(H_y_i)
         
-        if abs(y_H_y) > 1e-16:
+        if torch.abs(y_H_y) > 1e-16:
             z = z - (y_i.dot(z) / y_H_y) * H_y_i
         
         z = z + rho_i * s_i.dot(z) * s_i
         
         # Self-scaled Broyden correction if phi != 1
-        if abs(phi_i - 1.0) > 1e-16:
+        if torch.abs(phi_i - 1.0) > 1e-16:
             # v_i = sqrt(y_H_y) * [s_i/(y_i·s_i) - H_y_i/y_H_y]
-            v_i = math.sqrt(abs(y_H_y)) * (rho_i * s_i - H_y_i / y_H_y)
+            v_i = torch.sqrt(torch.abs(y_H_y)) * (rho_i * s_i - H_y_i / y_H_y)
             v_norm_sq = v_i.dot(v_i)
             if v_norm_sq > 1e-16:
                 z = z + phi_i * (v_i.dot(z) / v_norm_sq) * v_i
@@ -144,15 +143,15 @@ class L_SSBroyden(Optimizer):
             alphas.append(alpha_i)
             
             # Self-scaled Broyden correction
-            if abs(phi_i - 1.0) > 1e-16:
+            if torch.abs(phi_i - 1.0) > 1e-16:
                 # Compute H_i y_i
                 H_y_i = self._compute_Hy_recursive(y_i, history_s[:i], history_y[:i],
                                                   history_tau[:i], history_phi[:i],
                                                   history_rho[:i], i-1, gamma)
                 h_i = y_i.dot(H_y_i)
                 
-                if abs(h_i) > 1e-16:
-                    v_i = math.sqrt(abs(h_i)) * (rho_i * s_i - H_y_i / h_i)
+                if torch.abs(h_i) > 1e-16:
+                    v_i = torch.sqrt(torch.abs(h_i)) * (rho_i * s_i - H_y_i / h_i)
                     v_norm_sq = v_i.dot(v_i)
                     if v_norm_sq > 1e-16:
                         xi_i = v_i.dot(q) / v_norm_sq
@@ -185,8 +184,8 @@ class L_SSBroyden(Optimizer):
         """Compute self-scaling parameters tau_k and phi_k."""
         # Compute auxiliary variables
         rho_k_inv = y_k.dot(s_k)
-        if abs(rho_k_inv) < 1e-10:
-            return 1.0, 1.0  # Skip update if y·s is too small
+        if torch.abs(rho_k_inv) < 1e-10:
+            return torch.tensor(1.0, device=y_k.device), torch.tensor(1.0, device=y_k.device)  # Skip update if y·s is too small
         
         rho_k = 1.0 / rho_k_inv
         
@@ -213,33 +212,35 @@ class L_SSBroyden(Optimizer):
         # Compute tau and phi according to the paper
         a_k = h_k * b_k - 1
         
-        if abs(a_k) < 1e-16:
-            return 1.0, 1.0
+        if torch.abs(a_k) < 1e-16:
+            return torch.tensor(1.0, device=y_k.device), torch.tensor(1.0, device=y_k.device)
         
         # Self-scaled parameters
-        rho_k_minus = min(1.0, h_k * (1 - math.sqrt(abs(a_k) / (1 + a_k))))
+        rho_k_minus = torch.minimum(torch.tensor(1.0, device=y_k.device), 
+                                   h_k * (1 - torch.sqrt(torch.abs(a_k) / (1 + a_k))))
         theta_k_minus = (rho_k_minus - 1) / a_k
         theta_k_plus = 1 / rho_k_minus
-        theta_k = max(theta_k_minus, min(theta_k_plus, (1 - b_k) / b_k))
+        theta_k = torch.maximum(theta_k_minus, torch.minimum(theta_k_plus, (1 - b_k) / b_k))
         
-        rho_k_cap = min(1.0, 1 / b_k) if b_k > 0 else 1.0
+        rho_k_cap = torch.minimum(torch.tensor(1.0, device=y_k.device), 1 / b_k) if b_k > 0 else torch.tensor(1.0, device=y_k.device)
         sigma_k = 1 + theta_k * a_k
         n = self._numel()
         if n > 20:  # For large n, use approximation
-            log_sigma = torch.log(abs(sigma_k) + 1e-10)
+            log_sigma = torch.log(torch.abs(sigma_k) + 1e-10)
             sigma_pow = torch.exp(log_sigma / (1 - n))
         else:
-            sigma_pow = abs(sigma_k) ** (1.0 / (1 - n))
+            sigma_pow = torch.abs(sigma_k) ** (1.0 / (1 - n))
             
         if theta_k <= 0:
-            tau_k = min(rho_k_cap * sigma_pow, sigma_k)
+            tau_k = torch.minimum(rho_k_cap * sigma_pow, sigma_k)
         else:
-            tau_k = rho_k_cap * min(sigma_pow, 1 / theta_k)
+            tau_k = rho_k_cap * torch.minimum(sigma_pow, 1 / theta_k)
             
             phi_k = (1 - theta_k) / (1 + a_k * theta_k)
         
         # Ensure tau_k is positive and reasonable
-        tau_k = max(1e-8, min(tau_k, 1e8))
+        tau_k = torch.maximum(torch.tensor(1e-8, device=y_k.device), 
+                             torch.minimum(tau_k, torch.tensor(1e8, device=y_k.device)))
         
         return tau_k, phi_k
     
@@ -265,7 +266,7 @@ class L_SSBroyden(Optimizer):
                 continue
             
             # Curvature condition
-            if abs(g_new_dot_p) <= c2 * abs(g_dot_p):
+            if torch.abs(g_new_dot_p) <= c2 * torch.abs(g_dot_p):
                 return alpha, f_new, g_new
             
             # If slope is positive, step is too large
@@ -361,7 +362,7 @@ class L_SSBroyden(Optimizer):
         y_k = g_new - g_k
         
         rho_k_inv = y_k.dot(s_k)
-        if abs(rho_k_inv) > 1e-16:
+        if torch.abs(rho_k_inv) > 1e-16:
             rho_k = 1.0 / rho_k_inv
             
             # Compute H_k y_k for tau and phi calculation
