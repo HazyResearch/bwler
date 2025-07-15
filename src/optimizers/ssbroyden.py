@@ -11,7 +11,7 @@ from torch.optim.optimizer import Optimizer, required
 
 def _flatten(params: List[Tensor]) -> Tensor:
     """Flatten a list of tensors into a single 1‑D tensor (views, not copies)."""
-    return torch.cat([p.data.view(-1) for p in params])
+    return torch.cat([p.data.reshape(-1) for p in params])
 
 
 def _unflatten(vec: Tensor, params_example: List[Tensor]) -> List[Tensor]:
@@ -86,9 +86,9 @@ class SSBroyden2(Optimizer):
         grads: List[Tensor] = []
         for p in self._params:
             if p.grad is None:
-                grads.append(torch.zeros_like(p.data.view(-1)))
+                grads.append(torch.zeros_like(p.data.reshape(-1)))
             else:
-                grads.append(p.grad.view(-1))
+                grads.append(p.grad.reshape(-1))
         return torch.cat(grads).detach()
 
     def _write_params(self, flat: Tensor):
