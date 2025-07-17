@@ -211,7 +211,7 @@ class BaseFcn:
             },
             "lbfgs": {
                 "constructor": torch.optim.LBFGS,
-                "kwargs": {"history_size": 1000},
+                "kwargs": {"history_size": 100, "tolerance_grad": 1e-16, "tolerance_change": 1e-16},
             },
             "nys_newton": {
                 "constructor": NysNewtonCG,
