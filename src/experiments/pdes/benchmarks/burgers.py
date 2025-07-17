@@ -296,7 +296,7 @@ class Burgers(BasePDE):
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
-    args.add_argument("--nu", type=float, default=0.01 / torch.pi)
+
     args.add_argument(
         "--n_t", type=int, default=161
     )  # Number of time nodes in interpolant
@@ -353,6 +353,12 @@ if __name__ == "__main__":
         default=None,
         help="Stencil size for FD in time dimension (None for spectral)",
     )
+    
+    # Add pretraining parameters
+    args.add_argument("--pretrain_mlp", action="store_true", help="Enable MLP pretraining for polynomial model")
+    args.add_argument("--pretrain_epochs", type=int, default=5000, help="Number of pretraining epochs")
+    args.add_argument("--pretrain_optimizer", type=str, default="ssbroyden", help="Optimizer for pretraining")
+    args.add_argument("--pretrain_eval_every", type=int, default=100, help="Evaluation frequency during pretraining")
 
     args = args.parse_args()
 
@@ -567,7 +573,68 @@ if __name__ == "__main__":
             )
             return [torch.tensor([0.0], device=device, requires_grad=True), ic_nodes]
 
-        print(f"Training Polynomial Interpolant with {args.method} optimizer...")
+        # Check if pretraining is enabled
+        if args.pretrain_mlp:
+            print(f"Pre-training MLP with {args.pretrain_optimizer} optimizer...")
+            
+            # Create MLP model for pretraining
+            mlp_model = MLP(
+                n_dim=2,
+                n_layers=args.n_layers,
+                hidden_dim=args.hidden_dim,
+                activation=torch.tanh,
+                device=device,
+            )
+            
+            # Setup pretraining optimizer
+            if args.pretrain_optimizer == "ssbroyden":
+                from src.optimizers.ssbroyden import SSBroyden2
+                pretrain_optimizer = SSBroyden2(
+                    mlp_model.parameters(),
+                    lr=1.0,
+                    init_scale=True,
+                    c1=1e-4,
+                    c2=0.9,
+                    max_ls=20,
+                )
+            else:
+                pretrain_optimizer = pde.get_optimizer(mlp_model, args.pretrain_optimizer)
+            
+            # Setup pretraining logger
+            pretrain_save_dir = os.path.join(save_dir, "pretrain")
+            os.makedirs(pretrain_save_dir, exist_ok=True)
+            pretrain_logger = Logger(path=os.path.join(pretrain_save_dir, "pretrain_logger.json"))
+            
+            # Pretrain MLP
+            pde.train(
+                mlp_model,
+                n_epochs=args.pretrain_epochs,
+                optimizer=pretrain_optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=args.pretrain_eval_every,
+                save_dir=pretrain_save_dir,
+                logger=pretrain_logger,
+                lr_schedule=args.lr_schedule,
+                gradient_clip=args.gradient_clip,
+            )
+            
+            # Transfer MLP values to polynomial model
+            print("Transferring MLP values to polynomial model...")
+            model.load_values_from_model(mlp_model)
+            print(f"Transferred values with shape: {model.values.shape}")
+            print(f"Value range: [{model.values.min().item():.4f}, {model.values.max().item():.4f}]")
+            
+            # Save pretrained MLP
+            torch.save(mlp_model.state_dict(), os.path.join(pretrain_save_dir, "pretrained_mlp.pt"))
+            
+            print(f"Training Polynomial Interpolant with {args.method} optimizer (from pretrained initialization)...")
+        else:
+            print(f"Training Polynomial Interpolant with {args.method} optimizer...")
+            
         pde.train(
             model,
             n_epochs=n_epochs,
