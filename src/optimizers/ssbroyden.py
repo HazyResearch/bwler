@@ -9,6 +9,7 @@ from torch.optim.optimizer import Optimizer, required
 # Helper utilities for flattening / un‑flattening parameter tensors
 # -----------------------------------------------------------------------------
 
+
 def _flatten(params: List[Tensor]) -> Tensor:
     """Flatten a list of tensors into a single 1‑D tensor (views, not copies)."""
     return torch.cat([p.data.reshape(-1) for p in params])
@@ -28,6 +29,7 @@ def _unflatten(vec: Tensor, params_example: List[Tensor]) -> List[Tensor]:
 # -----------------------------------------------------------------------------
 # SSBroyden‑II optimizer with *strong Wolfe* line‑search
 # -----------------------------------------------------------------------------
+
 
 class SSBroyden2(Optimizer):
     """Dense *Self‑Scaled Broyden‑II* optimizer with a strong‑Wolfe line search.
@@ -162,7 +164,9 @@ class SSBroyden2(Optimizer):
     @torch.no_grad()
     def step(self, closure):  # closure required!
         if closure is None:
-            raise RuntimeError("SSBroyden2 requires a `closure` that re‑evaluates the model.")
+            raise RuntimeError(
+                "SSBroyden2 requires a `closure` that re‑evaluates the model."
+            )
 
         group = self.param_groups[0]
         c1: float = group["c1"]
@@ -227,11 +231,11 @@ class SSBroyden2(Optimizer):
         # ------------------------------------------------------------------
         # Quasi‑Newton update (self‑scaled Broyden‑II)
         # ------------------------------------------------------------------
-        s_k = x_new - x_k        # = alpha · p_k
+        s_k = x_new - x_k  # = alpha · p_k
         y_k = g_new - g_k
 
         rhok_inv = y_k.dot(s_k)
-        rhok_inv = rhok_inv# + torch.sign(rhok_inv) * 1e-8  # ensure non‑zero
+        rhok_inv = rhok_inv  # + torch.sign(rhok_inv) * 1e-8  # ensure non‑zero
         if rhok_inv.abs() < 1e-30:
             # Skip rank‑two update if curvature condition degenerates
             self.state["H"] = H_k
@@ -246,8 +250,10 @@ class SSBroyden2(Optimizer):
         a_k = b_k * h_k - 1.0
 
         # ρ_k^‑, θ_k, τ_k   (cf. Urbán et al.)
-        rho_k_minus = torch.minimum(torch.tensor(1.0, device=self._device),
-                                    h_k * (1 - torch.sqrt(torch.abs(a_k) / (1 + a_k))))
+        rho_k_minus = torch.minimum(
+            torch.tensor(1.0, device=self._device),
+            h_k * (1 - torch.sqrt(torch.abs(a_k) / (1 + a_k))),
+        )
         theta_k_minus = (rho_k_minus - 1) / a_k
         theta_k_plus = 1 / rho_k_minus
         theta_k = torch.max(theta_k_minus, torch.min(theta_k_plus, (1 - b_k) / b_k))
@@ -264,10 +270,10 @@ class SSBroyden2(Optimizer):
         phi_k = (1 - theta_k) / (1 + a_k * theta_k)
 
         H_new = (
-            (H_k - torch.outer(Hkyk, Hkyk) / ykHkyk + phi_k * ykHkyk * torch.outer(v_k, v_k))
-            / tau_k
-            + rhok * torch.outer(s_k, s_k)
-        )
+            H_k
+            - torch.outer(Hkyk, Hkyk) / ykHkyk
+            + phi_k * ykHkyk * torch.outer(v_k, v_k)
+        ) / tau_k + rhok * torch.outer(s_k, s_k)
 
         self.state["H"] = H_new.detach().clone()
 
