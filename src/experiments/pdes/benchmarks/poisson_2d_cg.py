@@ -534,8 +534,14 @@ if __name__ == "__main__":
         "--optimizer",
         type=str,
         default="nys_newton",
-        choices=["nys_newton", "adam"],
+        choices=["nys_newton", "adam", "ssbroyden", "lssbroyden", "adam_ssbroyden"],
         help="Optimizer to use for training",
+    )
+    parser.add_argument(
+        "--n_adam_epochs",
+        type=int,
+        default=5000,
+        help="Number of Adam epochs for adam_ssbroyden method",
     )
     parser.add_argument(
         "--n_per_side",
@@ -628,6 +634,32 @@ if __name__ == "__main__":
         )
     elif args.optimizer == "adam":
         optimizer_spec = pde.get_optimizer(model_spec, "adam")
+    elif args.optimizer == "ssbroyden":
+        from src.optimizers.ssbroyden import SSBroyden2
+        
+        optimizer_spec = SSBroyden2(
+            model_spec.parameters(),
+            lr=1.0,
+            init_scale=True,
+            c1=1e-4,
+            c2=0.9,
+            max_ls=20,
+        )
+    elif args.optimizer == "lssbroyden":
+        from src.optimizers.Lssbroyden import L_SSBroyden
+        
+        optimizer_spec = L_SSBroyden(
+            model_spec.parameters(),
+            lr=1.0,
+            history_size=10,
+            init_scale=True,
+            c1=1e-4,
+            c2=0.9,
+            max_ls=20,
+        )
+    elif args.optimizer == "adam_ssbroyden":
+        # For adam_ssbroyden, we'll use a placeholder optimizer and call the special training method
+        optimizer_spec = None  # Will be handled in the training call
     else:
         raise ValueError(f"Unsupported optimizer: {args.optimizer}")
     ic_weight = 10.0
@@ -673,26 +705,42 @@ if __name__ == "__main__":
     # Train the model
     hyperparam_str = f"spectral_nx={n_x}_ny={n_y}_epochs={args.n_epochs}_eval_every={args.eval_every}_sample=uniform_optimizer={args.optimizer}"
 
-    pde.train(
-        model=model_spec,
-        n_epochs=args.n_epochs,
-        optimizer=optimizer_spec,
-        pde_sampler=pde_sampler,
-        ic_sampler=ic_sampler,
-        ic_weight=ic_weight,
-        eval_sampler=eval_sampler,
-        eval_metrics=eval_metrics,
-        eval_every=args.eval_every,
-        save_dir=spectral_save_dir,
-        logger=logger_spec,
-        n_square_boundary=n_square_boundary,
-        weights_dir=weights_dir,
-        images_dir=images_dir,
-        hyperparam_str=hyperparam_str,
-        hessian_every=-1,  # Add explicit hessian parameters
-        hessian_num_iter=100,
-        hessian_num_run=1,
-    )
+    # Handle different training methods
+    if args.optimizer == "adam_ssbroyden":
+        # Use the special adam_ssbroyden training method
+        pde.train_adam_ssbroyden(
+            model=model_spec,
+            n_epochs=args.n_epochs,
+            n_adam_epochs=args.n_adam_epochs,
+            pde_sampler=pde_sampler,
+            ic_sampler=ic_sampler,
+            ic_weight=ic_weight,
+            eval_sampler=eval_sampler,
+            eval_metrics=eval_metrics,
+            eval_every=args.eval_every,
+            save_dir=spectral_save_dir,
+            logger=logger_spec,
+            n_square_boundary=n_square_boundary,
+        )
+    else:
+        # Use the standard training method
+        pde.train(
+            model=model_spec,
+            n_epochs=args.n_epochs,
+            optimizer=optimizer_spec,
+            pde_sampler=pde_sampler,
+            ic_sampler=ic_sampler,
+            ic_weight=ic_weight,
+            eval_sampler=eval_sampler,
+            eval_metrics=eval_metrics,
+            eval_every=args.eval_every,
+            save_dir=spectral_save_dir,
+            logger=logger_spec,
+            n_square_boundary=n_square_boundary,
+            hessian_every=-1,  # Add explicit hessian parameters
+            hessian_num_iter=100,
+            hessian_num_run=1,
+        )
 
     # Evaluate and plot the final solution
     print("\033[92m" + "=" * 80 + "\033[0m")

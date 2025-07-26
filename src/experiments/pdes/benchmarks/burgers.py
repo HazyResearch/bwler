@@ -446,6 +446,18 @@ if __name__ == "__main__":
                 c2=0.9,
                 max_ls=20,
             )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model_mlp.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
         else:
             optimizer = pde.get_optimizer(model_mlp, args.method)
 
@@ -536,6 +548,18 @@ if __name__ == "__main__":
             optimizer = SSBroyden2(
                 model.parameters(),
                 lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model.parameters(),
+                lr=1.0,
+                history_size=10,
                 init_scale=True,
                 c1=1e-4,
                 c2=0.9,
@@ -698,6 +722,18 @@ if __name__ == "__main__":
                 c2=0.9,
                 max_ls=20,
             )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
         else:
             optimizer = pde.get_optimizer(model, args.method)
 
@@ -855,6 +891,18 @@ if __name__ == "__main__":
             optimizer = SSBroyden2(
                 model.parameters(),
                 lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model.parameters(),
+                lr=1.0,
+                history_size=10,
                 init_scale=True,
                 c1=1e-4,
                 c2=0.9,

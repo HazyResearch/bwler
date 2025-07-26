@@ -248,7 +248,7 @@ if __name__ == "__main__":
     c = args.c
     t_final = 1
     u_0 = torch.sin
-    pde = convection(
+    pde = Convection(
         c=c,
         t_final=t_final,
         u_0=u_0,
@@ -353,6 +353,29 @@ if __name__ == "__main__":
                 cg_tol=1e-16,
                 line_search_fn="armijo",
             )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model_mlp.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model_mlp.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
         else:
             optimizer = pde.get_optimizer(model_mlp, args.method)
 
@@ -438,6 +461,29 @@ if __name__ == "__main__":
                 mu=1e-2,
                 cg_tol=1e-16,
                 line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
             )
         else:
             optimizer = pde.get_optimizer(model, args.method)
@@ -533,6 +579,29 @@ if __name__ == "__main__":
                 mu=1e-2,
                 cg_tol=1e-16,
                 line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
             )
         else:
             optimizer = pde.get_optimizer(model, args.method)
