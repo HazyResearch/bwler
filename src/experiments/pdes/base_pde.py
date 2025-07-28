@@ -909,7 +909,7 @@ class BasePDE(BaseFcn):
                     plt.show()
                 plt.close()
 
-    # Optimizes with Adam for n_adam_epochs, then optimizes with NysNewtonCG for n_nys_newton_epochs
+    # Optimizes with Adam for n_adam_epochs, then optimizes with L-BFGS for n_lbfgs_epochs
     def train_model_alternating(
         self,
         model: nn.Module,
@@ -921,7 +921,7 @@ class BasePDE(BaseFcn):
         eval_metrics: List[Callable],
         eval_every: int = 100,
         n_adam_epochs: int = 10000,
-        n_nys_newton_epochs: int = 100,
+        n_lbfgs_epochs: int = 100,
         save_dir: str = None,
         logger: Logger = None,
         hessian_every: int = -1,  # Add hessian_every parameter
@@ -933,14 +933,26 @@ class BasePDE(BaseFcn):
         if logger is None:
             logger = Logger(path=os.path.join(save_dir, "logger.json"))
 
-        print("Training model with alternating optimization...")
-        optimizer_adam = self.get_optimizer(model, "adam")
-        optimizer_nys_newton = self.get_optimizer(model, "nys_newton")
+        print("Training model with alternating Adam/L-BFGS optimization...")
+        
+        # Create optimizers
+        optimizer_adam = torch.optim.Adam(model.parameters(), lr=1e-3)
+        optimizer_lbfgs = torch.optim.LBFGS(model.parameters(), lr=1.0, max_iter=20)
+        
+        # Add logging to validate optimizer types
+        print(f"Adam optimizer type: {type(optimizer_adam)}")
+        print(f"L-BFGS optimizer type: {type(optimizer_lbfgs)}")
+        
         start_time = time()
 
-        # Define closure for NysNewtonCG that returns both loss and gradient
-        def closure():
-            optimizer_nys_newton.zero_grad()
+        # Sample points once for L-BFGS (works better with fixed points)
+        pde_nodes = pde_sampler()
+        ic_nodes = ic_sampler()
+        eval_nodes = eval_sampler()
+
+        # Define closure for L-BFGS that returns only the loss
+        def lbfgs_closure():
+            optimizer_lbfgs.zero_grad()
             loss, pde_loss, ic_loss = self.get_pde_loss(
                 model,
                 pde_nodes,
@@ -948,36 +960,29 @@ class BasePDE(BaseFcn):
                 ic_weight,
                 n_square_boundary=n_square_boundary,
             )
-            # Compute gradient with create_graph=True for Hessian computation
-            grads = torch.autograd.grad(loss, model.parameters(), create_graph=True)
-
-            # Make gradients contiguous and reshape them
-            grads = [g.contiguous() for g in grads]
-
-            # Update preconditioner every iteration
-            optimizer_nys_newton.update_preconditioner(grads)
-
-            return loss, grads
+            loss.backward()
+            return loss
 
         # Training loop
         for epoch in tqdm(range(n_epochs)):
-
-            # Sample points
-            pde_nodes = pde_sampler()
-            ic_nodes = ic_sampler()
-
-            # Optimize with Adam
-            if (epoch % (n_adam_epochs + n_nys_newton_epochs)) < n_adam_epochs:
-
+            
+            # Determine which optimizer to use based on alternating pattern
+            cycle_length = n_adam_epochs + n_lbfgs_epochs
+            cycle_position = epoch % cycle_length
+            
+            if cycle_position < n_adam_epochs:
+                # Use Adam
+                optimizer_type = "Adam"
+                
+                # Sample new points for Adam (can use different points each time)
+                pde_nodes = pde_sampler()
+                ic_nodes = ic_sampler()
+                
                 # Update loss weights
-                self.update_loss_weights(
-                    epoch, model, optimizer_adam, pde_nodes, ic_nodes
-                )
+                self.update_loss_weights(epoch, model, optimizer_adam, pde_nodes, ic_nodes)
 
-                # Train step
+                # Train step with Adam
                 optimizer_adam.zero_grad()
-
-                # Get PDE loss
                 loss, pde_loss, ic_loss = self.get_pde_loss(
                     model,
                     pde_nodes,
@@ -985,39 +990,42 @@ class BasePDE(BaseFcn):
                     ic_weight,
                     n_square_boundary=n_square_boundary,
                 )
-
-                # Backprop
                 loss.backward()
-
-                # Update parameters
                 optimizer_adam.step()
-
-            # Optimize with NysNewtonCG
+                
             else:
-
-                # Optimize
-                loss, _ = optimizer_nys_newton.step(closure)
-
+                # Use L-BFGS
+                optimizer_type = "L-BFGS"
+                
                 # Update loss weights
-                self.update_loss_weights(
-                    epoch, model, optimizer_nys_newton, pde_nodes, ic_nodes
-                )
+                self.update_loss_weights(epoch, model, optimizer_lbfgs, pde_nodes, ic_nodes)
+                
+                # Train step with L-BFGS
+                loss = optimizer_lbfgs.step(lbfgs_closure)
 
-            # Log
+            # Log optimizer type for debugging
+            logger.log("optimizer_type", optimizer_type, epoch)
             logger.log("loss", loss.item(), epoch)
+            logger.log("cycle_position", cycle_position, epoch)
+            logger.log("cycle_length", cycle_length, epoch)
+            
+            # Print detailed info every 1000 epochs for debugging
+            if epoch % 1000 == 0:
+                print(f"Epoch {epoch}: Using {optimizer_type}, cycle position {cycle_position}/{cycle_length}")
+                print(f"Current loss: {loss.item():.6e}")
 
             # Eval, print, and plot progress
             if (epoch + 1) % eval_every == 0:
 
                 # Save checkpoint
-                torch.save(
-                    model.state_dict(),
-                    os.path.join(save_dir, f"checkpoint_{epoch}.pth"),
-                )
+                if save_dir is not None:
+                    torch.save(
+                        model.state_dict(),
+                        os.path.join(save_dir, f"checkpoint_{epoch}.pth"),
+                    )
 
                 # Evaluate solution
                 with torch.no_grad():
-                    eval_nodes = eval_sampler()
                     u_eval = model(eval_nodes)
                     u_true = self.get_solution(eval_nodes)
                     for eval_metric in eval_metrics:
@@ -1047,6 +1055,7 @@ class BasePDE(BaseFcn):
 
                 current_time = time() - start_time
                 print(f"Epoch {epoch + 1} completed in {current_time:.2f} seconds")
+                print(f"Using optimizer: {optimizer_type}")
                 print(
                     f"PDE loss: {logger.get_most_recent_value('train_pde_loss'):1.3e}"
                 )
@@ -1111,7 +1120,10 @@ class BasePDE(BaseFcn):
                     label="Eval Max Error",
                 )
                 plt.legend()
-                plt.savefig(os.path.join(save_dir, "loss_history.png"))
+                if save_dir is not None:
+                    plt.savefig(os.path.join(save_dir, "loss_history.png"))
+                else:
+                    plt.show()
                 plt.close()
 
     def train(
@@ -1130,8 +1142,36 @@ class BasePDE(BaseFcn):
         hessian_every: int = -1,  # Add hessian_every parameter
         hessian_num_iter: int = 100,
         hessian_num_run: int = 1,
+        alternating_training: bool = False,  # New parameter for alternating training
+        n_adam_epochs: int = 10000,  # Number of Adam epochs per cycle
+        n_lbfgs_epochs: int = 100,   # Number of L-BFGS epochs per cycle
         **kwargs,
     ):
+        # Route to alternating training if requested
+        if alternating_training:
+            print("Using alternating Adam/L-BFGS training...")
+            self.train_model_alternating(
+                model,
+                n_epochs,
+                pde_sampler,
+                ic_sampler,
+                ic_weight,
+                eval_sampler,
+                eval_metrics,
+                eval_every,
+                n_adam_epochs,
+                n_lbfgs_epochs,
+                save_dir,
+                logger,
+                hessian_every=hessian_every,
+                hessian_num_iter=hessian_num_iter,
+                hessian_num_run=hessian_num_run,
+                n_square_boundary=kwargs.get("n_square_boundary", 0),
+                **kwargs,
+            )
+            return
+            
+        # Original routing logic for single optimizer
         if isinstance(optimizer, NysNewtonCG):
             self.train_model_nys_newton(
                 model,
@@ -1148,6 +1188,7 @@ class BasePDE(BaseFcn):
                 hessian_every=hessian_every,
                 hessian_num_iter=hessian_num_iter,
                 hessian_num_run=hessian_num_run,
+                n_square_boundary=kwargs.get("n_square_boundary", 0),
                 **kwargs,
             )
         elif isinstance(optimizer, torch.optim.LBFGS):
@@ -1169,6 +1210,7 @@ class BasePDE(BaseFcn):
                 n_square_boundary=kwargs.get(
                     "n_square_boundary", 0
                 ),  # Pass through n_square_boundary
+                **kwargs,
             )
         else:
             self.train_model(
@@ -1189,4 +1231,5 @@ class BasePDE(BaseFcn):
                 n_square_boundary=kwargs.get(
                     "n_square_boundary", 0
                 ),  # Pass through n_square_boundary
+                **kwargs,
             )
