@@ -273,6 +273,157 @@ class Burgers(BasePDE):
             loss_dict["pde_loss"],
             loss_dict["ic_loss"] + loss_dict["pbc_loss"],
         )
+    
+    def get_pde_loss_mini_batch(
+        self,
+        model: nn.Module,
+        pde_nodes: List[torch.Tensor],
+        ic_nodes: List[torch.Tensor],
+        ic_weight: float = 1,
+        batch_size: int = 1000,
+        **kwargs,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Compute PDE loss using mini-batching to reduce memory usage.
+        
+        Args:
+            model: Neural network model
+            pde_nodes: List of tensors [t, x] with PDE collocation points
+            ic_nodes: List of tensors [t, x] with initial condition points
+            ic_weight: Weight for initial condition loss
+            batch_size: Size of mini-batches for PDE loss computation
+            
+        Returns:
+            Tuple of (total_loss, pde_loss, ic_loss)
+        """
+        n_t, n_x = pde_nodes[0].shape[0], pde_nodes[1].shape[0]
+        total_pde_points = n_t * n_x
+        
+        # Always compute IC and boundary losses (typically small)
+        ic_loss_dict = self._get_ic_and_boundary_losses(model, ic_nodes, pde_nodes)
+        ic_loss = ic_loss_dict["ic_loss"]
+        pbc_loss = ic_loss_dict["pbc_loss"]
+        
+        # Compute PDE loss in mini-batches if total points > batch_size
+        if total_pde_points <= batch_size:
+            # Use regular computation for small problems
+            loss_dict = self.get_loss_dict(model, pde_nodes, ic_nodes)
+            pde_loss = loss_dict["pde_loss"]
+        else:
+            # Create batched indices for PDE points
+            pde_loss = 0.0
+            num_batches = 0
+            
+            # Create meshgrid indices for batching
+            t_indices = torch.arange(n_t, device=pde_nodes[0].device)
+            x_indices = torch.arange(n_x, device=pde_nodes[1].device) 
+            
+            for start_idx in range(0, total_pde_points, batch_size):
+                end_idx = min(start_idx + batch_size, total_pde_points)
+                
+                # Convert flat indices to 2D indices
+                flat_indices = torch.arange(start_idx, end_idx, device=pde_nodes[0].device)
+                t_batch_indices = flat_indices // n_x
+                x_batch_indices = flat_indices % n_x
+                
+                # Extract batch nodes
+                t_batch = pde_nodes[0][t_batch_indices]
+                x_batch = pde_nodes[1][x_batch_indices]
+                pde_batch_nodes = [t_batch, x_batch]
+                
+                # Compute PDE loss for this batch
+                batch_pde_loss = self._compute_pde_loss_batch(model, pde_batch_nodes)
+                
+                # Accumulate loss (weighted by batch size)
+                batch_weight = len(flat_indices) / total_pde_points
+                pde_loss += batch_weight * batch_pde_loss
+                num_batches += 1
+        
+        # Combine losses with weights
+        pde_weight = self.loss_weights.get("pde_loss_weight", 1.0)
+        ic_weight_adjusted = self.loss_weights.get("ic_loss_weight", ic_weight)
+        pbc_weight = self.loss_weights.get("pbc_loss_weight", ic_weight)
+        
+        total_loss = (
+            (pde_weight * pde_loss)
+            + (ic_weight_adjusted * ic_weight * ic_loss)
+            + (ic_weight * pbc_weight * pbc_loss)
+        )
+        
+        return total_loss, pde_loss, ic_loss + pbc_loss
+    
+    def _get_ic_and_boundary_losses(self, model: nn.Module, ic_nodes: List[torch.Tensor], pde_nodes: List[torch.Tensor]):
+        """Compute IC and boundary condition losses (typically small, computed without batching)"""
+        
+        if isinstance(model, SpectralInterpolationND):
+            # IC
+            u_ic = model.interpolate(ic_nodes)[0]
+            # Boundary conditions
+            u_periodic_t0 = model.interpolate([
+                pde_nodes[0],
+                torch.tensor([self.domain[1][0]], dtype=pde_nodes[1].dtype, device=model.device, requires_grad=True)
+            ])
+            u_periodic_t1 = model.interpolate([
+                pde_nodes[0], 
+                torch.tensor([self.domain[1][1]], dtype=pde_nodes[1].dtype, device=model.device, requires_grad=True)
+            ])
+        else:
+            # IC
+            u_ic = model(ic_nodes)[0]
+            # Boundary conditions - for MLP models, create boundary points
+            boundary_t0_points = torch.stack([
+                pde_nodes[0],
+                torch.full_like(pde_nodes[0], self.domain[1][0])
+            ], dim=1)
+            boundary_t1_points = torch.stack([
+                pde_nodes[0],
+                torch.full_like(pde_nodes[0], self.domain[1][1])
+            ], dim=1)
+            u_periodic_t0 = model(boundary_t0_points).squeeze()
+            u_periodic_t1 = model(boundary_t1_points).squeeze()
+        
+        # IC loss
+        ic_residual = u_ic - self.u_0(ic_nodes[1])
+        ic_loss = torch.mean(ic_residual**2)
+        
+        # Boundary condition loss
+        pbc_loss = torch.mean(u_periodic_t0**2) + torch.mean(u_periodic_t1**2)
+        
+        return {"ic_loss": ic_loss, "pbc_loss": pbc_loss}
+    
+    def _compute_pde_loss_batch(self, model: nn.Module, pde_batch_nodes: List[torch.Tensor]):
+        """Compute PDE loss for a batch of collocation points"""
+        if isinstance(model, SpectralInterpolationND):
+            # For spectral interpolation, we need to be careful about batch evaluation
+            # Create a meshgrid for this batch
+            t_batch, x_batch = pde_batch_nodes[0], pde_batch_nodes[1]
+            
+            # Evaluate at the specific (t,x) pairs
+            batch_points = torch.stack([t_batch, x_batch], dim=1)  # (batch_size, 2)
+            
+            u = model.interpolate_batch(batch_points)
+            u_t = model.derivative(batch_points, k=(1, 0), use_spectral=True)
+            u_x = model.derivative(batch_points, k=(0, 1), use_spectral=True)
+            u_xx = model.derivative(batch_points, k=(0, 2), use_spectral=True)
+        else:
+            # For MLP models
+            batch_points = torch.stack([pde_batch_nodes[0], pde_batch_nodes[1]], dim=1)
+            batch_points.requires_grad_(True)
+            
+            u = model(batch_points).squeeze()
+            grads = torch.autograd.grad(u.sum(), batch_points, create_graph=True)[0]
+            u_t = grads[:, 0]
+            u_x = grads[:, 1]
+            
+            # Second derivative
+            grad_xx = torch.autograd.grad(u_x.sum(), batch_points, create_graph=True)[0]
+            u_xx = grad_xx[:, 1]
+        
+        # PDE residual: u_t + u * u_x - nu * u_xx = 0
+        pde_residual = u_t + u * u_x - self.nu * u_xx
+        pde_loss = torch.mean(pde_residual**2)
+        
+        return pde_loss
 
     def get_least_squares(self, model: SpectralInterpolationND):
         raise NotImplementedError("Least squares not implemented for Burgers equation")
@@ -359,6 +510,11 @@ if __name__ == "__main__":
     args.add_argument("--pretrain_epochs", type=int, default=5000, help="Number of pretraining epochs")
     args.add_argument("--pretrain_optimizer", type=str, default="ssbroyden", help="Optimizer for pretraining")
     args.add_argument("--pretrain_eval_every", type=int, default=100, help="Evaluation frequency during pretraining")
+    
+    # Mini-batching parameters
+    args.add_argument("--use_mini_batch", action="store_true", help="Enable mini-batching for memory efficiency")
+    args.add_argument("--batch_size", type=int, default=1000, help="Mini-batch size for PDE loss computation")
+    args.add_argument("--accumulate_grads", action="store_true", help="Accumulate gradients across mini-batches")
 
     args = args.parse_args()
 
@@ -491,19 +647,36 @@ if __name__ == "__main__":
             return [torch.tensor([0.0], device=device, requires_grad=True), ic_nodes]
 
         print(f"Training MLP with {args.method} optimizer...")
-        pde.train(
-            model_mlp,
-            n_epochs=args.n_epochs,
-            optimizer=optimizer,
-            pde_sampler=pde_sampler,
-            ic_sampler=ic_sampler,
-            ic_weight=ic_weight,
-            eval_sampler=eval_sampler,
-            eval_metrics=eval_metrics,
-            eval_every=eval_every,
-            save_dir=save_dir,
-            logger=logger,
-        )
+        if args.use_mini_batch:
+            pde.train_model_mini_batch(
+                model_mlp,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                batch_size=args.batch_size,
+                accumulate_grads=args.accumulate_grads,
+            )
+        else:
+            pde.train(
+                model_mlp,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+            )
 
     #########################################################
     # 2. Polynomial interpolation
@@ -659,19 +832,36 @@ if __name__ == "__main__":
         else:
             print(f"Training Polynomial Interpolant with {args.method} optimizer...")
             
-        pde.train(
-            model,
-            n_epochs=n_epochs,
-            optimizer=optimizer,
-            pde_sampler=pde_sampler,
-            ic_sampler=ic_sampler,
-            ic_weight=ic_weight,
-            eval_sampler=eval_sampler,
-            eval_metrics=eval_metrics,
-            eval_every=eval_every,
-            save_dir=save_dir,
-            logger=logger,
-        )
+        if args.use_mini_batch:
+            pde.train_model_mini_batch(
+                model,
+                n_epochs=n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                batch_size=args.batch_size,
+                accumulate_grads=args.accumulate_grads,
+            )
+        else:
+            pde.train(
+                model,
+                n_epochs=n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+            )
 
     #########################################################
     # 2b. Polynomial interpolation with finite differences
@@ -828,19 +1018,36 @@ if __name__ == "__main__":
         else:
             print(f"Training Polynomial Interpolant with FD in time dimension...")
             
-        pde.train(
-            model,
-            n_epochs=n_epochs,
-            optimizer=optimizer,
-            pde_sampler=pde_sampler,
-            ic_sampler=ic_sampler,
-            ic_weight=ic_weight,
-            eval_sampler=eval_sampler,
-            eval_metrics=eval_metrics,
-            eval_every=eval_every,
-            save_dir=save_dir,
-            logger=logger,
-        )
+        if args.use_mini_batch:
+            pde.train_model_mini_batch(
+                model,
+                n_epochs=n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                batch_size=args.batch_size,
+                accumulate_grads=args.accumulate_grads,
+            )
+        else:
+            pde.train(
+                model,
+                n_epochs=n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+            )
 
     #########################################################
     # 3. MLP Interpolant
@@ -941,18 +1148,37 @@ if __name__ == "__main__":
             return [torch.tensor([0.0], device=device, requires_grad=True), ic_nodes]
 
         print(f"\nTraining MLP Interpolant with {args.method} optimizer...")
-        pde.train(
-            model,
-            n_epochs=args.n_epochs,
-            optimizer=optimizer,
-            pde_sampler=pde_sampler,
-            ic_sampler=ic_sampler,
-            ic_weight=ic_weight,
-            eval_sampler=eval_sampler,
-            eval_metrics=eval_metrics,
-            eval_every=eval_every,
-            save_dir=save_dir,
-            logger=logger,
-            lr_schedule=args.lr_schedule,
-            gradient_clip=args.gradient_clip,
-        )
+        if args.use_mini_batch:
+            pde.train_model_mini_batch(
+                model,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                lr_schedule=args.lr_schedule,
+                gradient_clip=args.gradient_clip,
+                batch_size=args.batch_size,
+                accumulate_grads=args.accumulate_grads,
+            )
+        else:
+            pde.train(
+                model,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                lr_schedule=args.lr_schedule,
+                gradient_clip=args.gradient_clip,
+            )

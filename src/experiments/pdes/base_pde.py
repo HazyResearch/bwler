@@ -1861,3 +1861,202 @@ class BasePDE(BaseFcn):
                     "n_square_boundary", 0
                 ),  # Pass through n_square_boundary
             )
+            
+    def train_model_mini_batch(
+        self,
+        model: nn.Module,
+        n_epochs: int,
+        optimizer: torch.optim.Optimizer,
+        pde_sampler: Callable,
+        ic_sampler: Callable,
+        ic_weight: float,
+        eval_sampler: Callable,
+        eval_metrics: List[Callable],
+        eval_every: int = 1000,
+        save_dir: str = None,
+        logger: Logger = None,
+        lr_schedule: bool = True,
+        gradient_clip: float = 1.0,
+        batch_size: int = 1000,
+        accumulate_grads: bool = False,
+        hessian_every: int = -1,
+        hessian_num_iter: int = 100,
+        hessian_num_run: int = 1,
+        n_square_boundary: int = 0,
+    ):
+        """
+        Train model using mini-batching for memory efficiency.
+        
+        Args:
+            batch_size: Mini-batch size for PDE loss computation
+            accumulate_grads: Whether to accumulate gradients across mini-batches
+        """
+        if logger is None:
+            logger = Logger(path=os.path.join(save_dir, "logger.json"))
+
+        # Add learning rate scheduler if requested
+        if lr_schedule and isinstance(optimizer, torch.optim.Adam):
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=n_epochs, eta_min=1e-6
+            )
+        else:
+            scheduler = None
+
+        print(f"Training model with mini-batching (batch_size={batch_size})...")
+        start_time = time()
+        iter_times = []
+
+        for epoch in tqdm(range(n_epochs)):
+            iter_start_time = time()
+
+            # Sample points
+            pde_nodes = pde_sampler()
+            ic_nodes = ic_sampler()
+
+            # Update loss weights
+            self.update_loss_weights(epoch, model, optimizer, pde_nodes, ic_nodes)
+
+            # Train step with mini-batching
+            optimizer.zero_grad()
+
+            # Get PDE loss using mini-batching if available
+            if hasattr(self, 'get_pde_loss_mini_batch'):
+                loss, pde_loss, ic_loss = self.get_pde_loss_mini_batch(
+                    model,
+                    pde_nodes,
+                    ic_nodes,
+                    ic_weight,
+                    batch_size=batch_size,
+                    n_square_boundary=n_square_boundary,
+                )
+            else:
+                # Fallback to regular loss computation
+                loss, pde_loss, ic_loss = self.get_pde_loss(
+                    model,
+                    pde_nodes,
+                    ic_nodes,
+                    ic_weight,
+                    n_square_boundary=n_square_boundary,
+                )
+
+            # Backprop
+            loss.backward()
+
+            # Gradient clipping if requested
+            if gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm=gradient_clip
+                )
+
+            # Update parameters
+            optimizer.step()
+
+            # Update learning rate if using scheduler
+            if scheduler is not None:
+                scheduler.step()
+                current_lr = scheduler.get_last_lr()[0]
+                logger.log("learning_rate", current_lr, epoch)
+
+            # Record iteration time
+            iter_time = time() - iter_start_time
+            iter_times.append(iter_time)
+            logger.log("iter_time", iter_time, epoch)
+            logger.log(
+                "avg_iter_time",
+                sum(iter_times[-eval_every:]) / len(iter_times[-eval_every:]),
+                epoch,
+            )
+
+            # Log
+            logger.log("loss", loss.item(), epoch)
+            logger.log("train_pde_loss", pde_loss.item(), epoch)
+            logger.log("train_ic_loss", ic_loss.item(), epoch)
+
+            # Eval, print, and plot progress
+            if (epoch + 1) % eval_every == 0:
+                # Save checkpoint
+                if save_dir is not None:
+                    torch.save(
+                        model.state_dict(),
+                        os.path.join(save_dir, f"checkpoint_{epoch}.pth"),
+                    )
+
+                # Evaluate solution
+                eval_nodes = eval_sampler()
+                eval_u_exact = self.get_solution(eval_nodes)
+                eval_u_pred = model(eval_nodes)
+
+                # Evaluate model
+                eval_loss, eval_pde_loss, eval_ic_loss = self.get_pde_loss(
+                    model, eval_nodes, ic_nodes, ic_weight
+                )
+                logger.log("eval_loss", eval_loss.item(), epoch)
+                logger.log("eval_pde_loss", eval_pde_loss.item(), epoch)
+                logger.log("eval_ic_loss", eval_ic_loss.item(), epoch)
+
+                # Evaluate metrics
+                for metric in eval_metrics:
+                    metric_name = metric.__name__
+                    metric_value = metric(eval_u_pred, eval_u_exact)
+                    logger.log(f"eval_{metric_name}", metric_value.item(), epoch)
+
+                # Print progress
+                print(
+                    f"Epoch {epoch + 1}/{n_epochs}: Loss = {loss.item():.2e}, "
+                    f"Eval L2 = {metric_value.item():.2e}"
+                )
+
+                # Plot solution
+                if save_dir is not None:
+                    self.plot_solution(
+                        eval_nodes,
+                        eval_u_pred,
+                        save_path=os.path.join(save_dir, f"solution_{epoch}.png"),
+                    )
+
+                # Plot loss history
+                plt.figure(figsize=(12, 8))
+                plt.semilogy(
+                    logger.get_iters("loss"), logger.get_values("loss"), label="Train Loss"
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_loss"),
+                    logger.get_values("eval_loss"),
+                    label="Eval Loss",
+                )
+                plt.semilogy(
+                    logger.get_iters("eval_pde_loss"),
+                    logger.get_values("eval_pde_loss"),
+                    label="Eval PDE Loss",
+                )
+                if len(logger.get_values("eval_l2_error")) > 0:
+                    plt.semilogy(
+                        logger.get_iters("eval_l2_error"),
+                        logger.get_values("eval_l2_error"),
+                        label="Eval L2 Error",
+                    )
+                    plt.semilogy(
+                        logger.get_iters("eval_max_error"),
+                        logger.get_values("eval_max_error"),
+                        label="Eval Max Error",
+                    )
+                if scheduler is not None:
+                    plt.semilogy(
+                        logger.get_iters("learning_rate"),
+                        logger.get_values("learning_rate"),
+                        label="Learning Rate",
+                    )
+                plt.legend()
+                if save_dir is not None:
+                    plt.savefig(os.path.join(save_dir, "loss_history.png"))
+                else:
+                    plt.show()
+                plt.close()
+
+        # Log final timing metrics
+        total_time = time() - start_time
+        logger.log("total_runtime", total_time, n_epochs - 1)
+        logger.log("avg_iter_time", sum(iter_times) / len(iter_times), n_epochs - 1)
+        logger.log("min_iter_time", min(iter_times), n_epochs - 1)
+        logger.log("max_iter_time", max(iter_times), n_epochs - 1)
+        logger.save()
