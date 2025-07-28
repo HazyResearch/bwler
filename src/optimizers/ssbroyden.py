@@ -236,7 +236,7 @@ class SSBroyden2(Optimizer):
 
         rhok_inv = y_k.dot(s_k)
         rhok_inv = rhok_inv  # + torch.sign(rhok_inv) * 1e-8  # ensure non‑zero
-        if rhok_inv.abs() < 1e-30:
+        if rhok_inv.abs() < 1e-32:
             # Skip rank‑two update if curvature condition degenerates
             self.state["H"] = H_k
             return f_new  # type: ignore[return‑value]

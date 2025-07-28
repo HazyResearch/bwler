@@ -174,6 +174,7 @@ class BaseFcn:
             ax2.set_ylabel("x")
 
             # Plot 3: error (log scale)
+            error_min = max(1e-16, torch.min(errors[errors > 0]).item() if torch.any(errors > 0) else 1e-16)
             im3 = ax3.imshow(
                 errors.T,
                 extent=[
@@ -185,6 +186,7 @@ class BaseFcn:
                 origin="lower",
                 aspect="auto",
                 norm="log",
+                vmin=error_min,
             )
             plt.colorbar(im3, ax=ax3)
             title = "Absolute Error (L2RE = {:.2e})".format(l2_relative_errors)
