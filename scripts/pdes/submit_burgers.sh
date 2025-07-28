@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH -o slurm_burgers.sh
 #SBATCH --job-name burgers_training
-#SBATCH -p gpu-dgx
+#SBATCH -p gpu-turing
 #SBATCH --gres gpu:1
 #SBATCH --ntasks 1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=4
 #SBATCH --time=20:00:00     
-#SBATCH --mem=200G
+#SBATCH --mem=100G
 
 source /home/research/junmiaoh/CME391chris/bwler/.venv/bin/activate
 
@@ -25,7 +25,7 @@ N_X=321
 # MLP, SSBroyden
 CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_layers 3 --hidden_dim 64 --activation tanh --n_epochs 1000 --method ssbroyden --sample_type standard --model mlp --eval_every 50
 # BWLer-hatted MLP, SSBroyden
-CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 161 --n_x 161 --n_layers 3 --hidden_dim 64 --activation tanh --n_epochs 50000 --method ssbroyden --sample_type standard --model mlpinterp --eval_every 100
+CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 121 --n_x 121 --n_layers 3 --hidden_dim 64 --activation tanh --n_epochs 50000 --method ssbroyden --sample_type standard --model mlpinterp --eval_every 100
 # Explicit BWLer, SSBroyden
 #CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 161 --n_x 161 --n_epochs 50000 --method ssbroyden --sample_type standard --model polynomial_fd --eval_every 100 --fd_k 1
 
