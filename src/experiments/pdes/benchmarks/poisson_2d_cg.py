@@ -16,6 +16,7 @@ from pathlib import Path
 from src.experiments.pdes.base_pde import BasePDE
 from src.models.interpolant_nd import SpectralInterpolationND
 from src.models.mlp import MLP
+from src.models.mlp_interpolant_nd import MLPSpectralInterpolationND
 
 """
 Laplace equation in 2D with complex geometry:
@@ -177,8 +178,107 @@ class Poisson2DCG(BasePDE):
 
             return dict(zip(loss_names, [pde_loss, boundary_loss]))
 
+        elif isinstance(model, MLPSpectralInterpolationND):
+            # Handle MLPInterpolant model
+            # Compute the solution and its derivatives based on current model parameter values.
+            u_xx = model.derivative(pde_nodes, k=(2, 0))
+            u_yy = model.derivative(pde_nodes, k=(0, 2))
+
+            # Compute the value of the function at the boundary nodes from initial conditions
+            u_boundary = model.forward(ic_nodes)
+
+            # Split boundary nodes into exterior square boundary and interior circular boundaries
+            n_square_boundary = kwargs.get("n_square_boundary", 0)
+
+            if n_square_boundary > 0:
+                # Square exterior boundary (Dirichlet boundary condition = 1)
+                u_square_boundary = u_boundary[:n_square_boundary]
+                square_boundary_values = torch.ones_like(u_square_boundary)
+                square_boundary_loss = torch.mean(
+                    (u_square_boundary - square_boundary_values) ** 2
+                )
+
+                # Circular interior boundaries (Dirichlet boundary condition = 0)
+                u_circle_boundary = u_boundary[n_square_boundary:]
+                circle_boundary_loss = torch.mean(u_circle_boundary**2)
+
+            else:
+                # If boundary separation is not provided, treat all as one type
+                boundary_values = kwargs.get(
+                    "boundary_values", torch.zeros_like(u_boundary)
+                )
+                boundary_loss = torch.mean((u_boundary - boundary_values) ** 2)
+                square_boundary_loss = boundary_loss
+                circle_boundary_loss = 0.0
+
+            pde_residual = u_xx + u_yy
+            pde_loss = torch.mean(pde_residual**2)
+            boundary_loss = square_boundary_loss + circle_boundary_loss
+
+            loss_names = ["pde_loss", "boundary_loss"]
+
+            return dict(zip(loss_names, [pde_loss, boundary_loss]))
+
         else:
-            raise ValueError(f"Model type {type(model)} not supported")
+            # Handle MLP model (and other non-spectral models)
+            # For MLP models, we need to compute derivatives using autograd
+            # pde_nodes should be a single tensor with shape [N_points, 2]
+            # ic_nodes should be a single tensor with shape [N_boundary_points, 2]
+            
+            # Ensure pde_nodes and ic_nodes are in the right format
+            if isinstance(pde_nodes, list):
+                # Convert list of tensors to single tensor
+                pde_nodes = torch.stack(pde_nodes, dim=1)
+            if isinstance(ic_nodes, list):
+                # Convert list of tensors to single tensor
+                ic_nodes = torch.stack(ic_nodes, dim=1)
+            
+            # Compute solution at PDE points
+            u_pde = model(pde_nodes)
+            
+            # Compute derivatives using autograd
+            # First derivatives
+            grad_x = torch.autograd.grad(u_pde.sum(), pde_nodes, create_graph=True)[0][:, 0]
+            grad_y = torch.autograd.grad(u_pde.sum(), pde_nodes, create_graph=True)[0][:, 1]
+            
+            # Second derivatives
+            u_xx = torch.autograd.grad(grad_x.sum(), pde_nodes, create_graph=True)[0][:, 0]
+            u_yy = torch.autograd.grad(grad_y.sum(), pde_nodes, create_graph=True)[0][:, 1]
+            
+            # Compute solution at boundary points
+            u_boundary = model(ic_nodes)
+            
+            # Split boundary nodes into exterior square boundary and interior circular boundaries
+            n_square_boundary = kwargs.get("n_square_boundary", 0)
+
+            if n_square_boundary > 0:
+                # Square exterior boundary (Dirichlet boundary condition = 1)
+                u_square_boundary = u_boundary[:n_square_boundary]
+                square_boundary_values = torch.ones_like(u_square_boundary)
+                square_boundary_loss = torch.mean(
+                    (u_square_boundary - square_boundary_values) ** 2
+                )
+
+                # Circular interior boundaries (Dirichlet boundary condition = 0)
+                u_circle_boundary = u_boundary[n_square_boundary:]
+                circle_boundary_loss = torch.mean(u_circle_boundary**2)
+
+            else:
+                # If boundary separation is not provided, treat all as one type
+                boundary_values = kwargs.get(
+                    "boundary_values", torch.zeros_like(u_boundary)
+                )
+                boundary_loss = torch.mean((u_boundary - boundary_values) ** 2)
+                square_boundary_loss = boundary_loss
+                circle_boundary_loss = 0.0
+
+            pde_residual = u_xx + u_yy
+            pde_loss = torch.mean(pde_residual**2)
+            boundary_loss = square_boundary_loss + circle_boundary_loss
+
+            loss_names = ["pde_loss", "boundary_loss"]
+
+            return dict(zip(loss_names, [pde_loss, boundary_loss]))
 
     def get_pde_loss(
         self,
@@ -519,6 +619,29 @@ if __name__ == "__main__":
         "--n_y", type=int, default=51, help="Number of Chebyshev points in y-direction"
     )
     parser.add_argument(
+        "--n_layers", type=int, default=3, help="Number of layers in MLP"
+    )
+    parser.add_argument(
+        "--hidden_dim", type=int, default=256, help="Number of hidden nodes in MLP"
+    )
+    parser.add_argument(
+        "--activation", type=str, default="tanh", help="Activation function for MLP"
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="adam",
+        choices=["adam", "lbfgs", "nys_newton", "ssbroyden", "lssbroyden"],
+        help="Optimization method",
+    )
+    parser.add_argument(
+        "--model", type=str, default=None, help="Model type (mlp, polynomial, mlpinterp)"
+    )
+    parser.add_argument(
+        "--mlpinterp_random_collocation", action="store_true",
+        help="Use random collocation points for MLPInterpolant (default: fixed BWLer nodes)"
+    )
+    parser.add_argument(
         "--n_epochs", type=int, default=10000, help="Number of training epochs"
     )
     parser.add_argument(
@@ -576,6 +699,12 @@ if __name__ == "__main__":
         default=16,
         help="Max iterations for NysNewtonCG optimizer",
     )
+    parser.add_argument(
+        "--use_mlp_for_derivatives",
+        action="store_true",
+        help="Use MLP autograd for derivatives in MLPSpectralInterpolationND",
+    )
+
     args = parser.parse_args()
 
     base_dir = args.base_dir
@@ -612,14 +741,34 @@ if __name__ == "__main__":
     n_y = args.n_y
     bases = ["chebyshev", "chebyshev"]
 
-    # Initialize model
-    model_spec = SpectralInterpolationND(
-        Ns=[n_x, n_y], bases=bases, domains=pde.domain, device=pde.device
-    )
-    model_spec.values.weight = 0.5 * torch.ones_like(model_spec.values)
+    # Initialize model based on --model argument
+    if args.model is None or args.model == "polynomial":
+        model_spec = SpectralInterpolationND(
+            Ns=[n_x, n_y], bases=bases, domains=pde.domain, device=pde.device
+        )
+        model_spec.values.weight = 0.5 * torch.ones_like(model_spec.values)
+    elif args.model == "mlp":
+        model_spec = MLP(
+            n_dim=2,
+            n_layers=args.n_layers,
+            hidden_dim=args.hidden_dim,
+            activation=getattr(torch, args.activation),
+            device=pde.device,
+        )
+    elif args.model == "mlpinterp":
+        model_spec = MLPSpectralInterpolationND(
+            Ns=[n_x, n_y],
+            bases=bases,
+            domains=pde.domain,
+            device=pde.device,
+            hidden_layers=(args.hidden_dim,) * args.n_layers,
+            activation=getattr(torch, args.activation),
+        )
+    else:
+        raise ValueError(f"Unsupported model type: {args.model}")
 
     # Optimizer and training parameters
-    if args.optimizer == "nys_newton":
+    if args.method == "nys_newton":
         from src.optimizers.nys_newton_cg import NysNewtonCG
 
         optimizer_spec = NysNewtonCG(
@@ -632,9 +781,9 @@ if __name__ == "__main__":
             cg_max_iters=args.nncg_maxiters,
             verbose=False,
         )
-    elif args.optimizer == "adam":
+    elif args.method == "adam":
         optimizer_spec = pde.get_optimizer(model_spec, "adam")
-    elif args.optimizer == "ssbroyden":
+    elif args.method == "ssbroyden":
         from src.optimizers.ssbroyden import SSBroyden2
         
         optimizer_spec = SSBroyden2(
@@ -645,7 +794,7 @@ if __name__ == "__main__":
             c2=0.9,
             max_ls=20,
         )
-    elif args.optimizer == "lssbroyden":
+    elif args.method == "lssbroyden":
         from src.optimizers.Lssbroyden import L_SSBroyden
         
         optimizer_spec = L_SSBroyden(
@@ -657,11 +806,8 @@ if __name__ == "__main__":
             c2=0.9,
             max_ls=20,
         )
-    elif args.optimizer == "adam_ssbroyden":
-        # For adam_ssbroyden, we'll use a placeholder optimizer and call the special training method
-        optimizer_spec = None  # Will be handled in the training call
     else:
-        raise ValueError(f"Unsupported optimizer: {args.optimizer}")
+        optimizer_spec = pde.get_optimizer(model_spec, args.method)
     ic_weight = 10.0
     n_square_boundary = args.n_per_side * 4  # Default n_per_side in ic_sampler
 
@@ -669,9 +815,10 @@ if __name__ == "__main__":
     from src.loggers.logger import Logger
 
     # Compose a directory name that reflects all relevant hyperparameters
+    model_suffix = f"_{args.model}" if args.model else ""
     spectral_save_dir = os.path.join(
         base_dir,
-        f"nx={n_x}_ny={n_y}_epochs={args.n_epochs}_evalevery={args.eval_every}_opt={args.optimizer}"
+        f"method={args.method}_nx={n_x}_ny={n_y}_epochs={args.n_epochs}_evalevery={args.eval_every}{model_suffix}"
         f"_nside={args.n_per_side}_ncircle={args.n_per_circle}_nsamp={args.n_samples}_over={args.oversample_factor}"
         f"_rank={getattr(args, 'nncg_rank', 'NA')}_cgmax={getattr(args, 'nncg_maxiters', 'NA')}",
     )
@@ -685,17 +832,41 @@ if __name__ == "__main__":
 
     # Define samplers
     def pde_sampler():
-        return pde.pde_sampler(
-            n_samples=args.n_samples, oversample_factor=args.oversample_factor
-        )
+        if args.model == "mlp":
+            # For MLP models, return a single tensor with shape [N_points, 2]
+            return pde.pde_sampler(
+                n_samples=args.n_samples, oversample_factor=args.oversample_factor
+            )
+        else:
+            # For spectral models, return list of tensors
+            pde_points = pde.pde_sampler(
+                n_samples=args.n_samples, oversample_factor=args.oversample_factor
+            )
+            # Convert to list format for spectral models
+            return [pde_points[:, 0], pde_points[:, 1]]
 
     def ic_sampler():
-        return pde.ic_sampler(
-            n_per_side=args.n_per_side, n_per_circle=args.n_per_circle
-        )
+        if args.model == "mlp":
+            # For MLP models, return a single tensor with shape [N_boundary_points, 2]
+            return pde.ic_sampler(
+                n_per_side=args.n_per_side, n_per_circle=args.n_per_circle
+            )
+        else:
+            # For spectral models, return list of tensors
+            ic_points = pde.ic_sampler(
+                n_per_side=args.n_per_side, n_per_circle=args.n_per_circle
+            )
+            # Convert to list format for spectral models
+            return [ic_points[:, 0], ic_points[:, 1]]
 
     def eval_sampler():
-        return pde.ref_points
+        if args.model == "mlp":
+            # For MLP models, return a single tensor with shape [N_eval_points, 2]
+            return pde.ref_points
+        else:
+            # For spectral models, return list of tensors
+            eval_points = pde.ref_points
+            return [eval_points[:, 0], eval_points[:, 1]]
 
     # Define evaluation metrics
     from src.utils.metrics import l2_error, max_error, l2_relative_error
@@ -703,44 +874,26 @@ if __name__ == "__main__":
     eval_metrics = [l2_error, max_error, l2_relative_error]
 
     # Train the model
-    hyperparam_str = f"spectral_nx={n_x}_ny={n_y}_epochs={args.n_epochs}_eval_every={args.eval_every}_sample=uniform_optimizer={args.optimizer}"
+    hyperparam_str = f"spectral_nx={n_x}_ny={n_y}_epochs={args.n_epochs}_eval_every={args.eval_every}_sample=uniform_method={args.method}"
 
-    # Handle different training methods
-    if args.optimizer == "adam_ssbroyden":
-        # Use the special adam_ssbroyden training method
-        pde.train_adam_ssbroyden(
-            model=model_spec,
-            n_epochs=args.n_epochs,
-            n_adam_epochs=args.n_adam_epochs,
-            pde_sampler=pde_sampler,
-            ic_sampler=ic_sampler,
-            ic_weight=ic_weight,
-            eval_sampler=eval_sampler,
-            eval_metrics=eval_metrics,
-            eval_every=args.eval_every,
-            save_dir=spectral_save_dir,
-            logger=logger_spec,
-            n_square_boundary=n_square_boundary,
-        )
-    else:
-        # Use the standard training method
-        pde.train(
-            model=model_spec,
-            n_epochs=args.n_epochs,
-            optimizer=optimizer_spec,
-            pde_sampler=pde_sampler,
-            ic_sampler=ic_sampler,
-            ic_weight=ic_weight,
-            eval_sampler=eval_sampler,
-            eval_metrics=eval_metrics,
-            eval_every=args.eval_every,
-            save_dir=spectral_save_dir,
-            logger=logger_spec,
-            n_square_boundary=n_square_boundary,
-            hessian_every=-1,  # Add explicit hessian parameters
-            hessian_num_iter=100,
-            hessian_num_run=1,
-        )
+    # Use the standard training method
+    pde.train(
+        model=model_spec,
+        n_epochs=args.n_epochs,
+        optimizer=optimizer_spec,
+        pde_sampler=pde_sampler,
+        ic_sampler=ic_sampler,
+        ic_weight=ic_weight,
+        eval_sampler=eval_sampler,
+        eval_metrics=eval_metrics,
+        eval_every=args.eval_every,
+        save_dir=spectral_save_dir,
+        logger=logger_spec,
+        n_square_boundary=n_square_boundary,
+        hessian_every=-1,  # Add explicit hessian parameters
+        hessian_num_iter=100,
+        hessian_num_run=1,
+    )
 
     # Evaluate and plot the final solution
     print("\033[92m" + "=" * 80 + "\033[0m")

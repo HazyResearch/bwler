@@ -222,6 +222,25 @@ if __name__ == "__main__":
         help="How often to compute Hessian during training (-1 for never)",
     )
 
+    # Add alternating training arguments
+    args.add_argument(
+        "--alternating_training",
+        action="store_true",
+        help="Enable alternating Adam/L-BFGS training",
+    )
+    args.add_argument(
+        "--n_adam_epochs",
+        type=int,
+        default=90,
+        help="Number of Adam epochs per cycle for alternating training",
+    )
+    args.add_argument(
+        "--n_lbfgs_epochs",
+        type=int,
+        default=10,
+        help="Number of L-BFGS epochs per cycle for alternating training",
+    )
+
     # Add FD-specific arguments
     args.add_argument("--fd_k_t", type=float, default=0.5)
 
@@ -237,6 +256,10 @@ if __name__ == "__main__":
         action="store_true",
         help="Use MLP autograd for derivatives in MLPSpectralInterpolationND",
     )
+    
+    # Add MLPInterpolant collocation control
+    args.add_argument("--mlpinterp_random_collocation", action="store_true", 
+                     help="Use random collocation points for MLPInterpolant (default: fixed BWLer nodes)")
 
     args = args.parse_args()
 
@@ -259,6 +282,7 @@ if __name__ == "__main__":
 
     base_save_dir = os.path.join(
         os.path.dirname(__file__),
+        "..",
         "..",
         "..",
         "..",
@@ -424,6 +448,9 @@ if __name__ == "__main__":
             lr_schedule=args.lr_schedule,
             gradient_clip=args.gradient_clip,
             hessian_every=args.hessian_every,
+            alternating_training=args.alternating_training,
+            n_adam_epochs=args.n_adam_epochs,
+            n_lbfgs_epochs=args.n_lbfgs_epochs,
         )
 
     #########################################################
@@ -533,15 +560,21 @@ if __name__ == "__main__":
             lr_schedule=args.lr_schedule,
             gradient_clip=args.gradient_clip,
             hessian_every=args.hessian_every,
+            alternating_training=args.alternating_training,
+            n_adam_epochs=args.n_adam_epochs,
+            n_lbfgs_epochs=args.n_lbfgs_epochs,
         )
 
     #########################################################
     # 3. MLP Interpolant
     #########################################################
     if args.model is None or args.model == "mlpinterp":
+        # Add collocation type to save directory
+        collocation_suffix = "_random_collocation" if args.mlpinterp_random_collocation else "_fixed_collocation"
+        
         save_dir = os.path.join(
             base_save_dir,
-            f"mlpinterp/method={args.method}_nt={args.n_t}_nx={args.n_x}_nlayers={args.n_layers}_hdim={args.hidden_dim}_activation={args.activation}_sample={args.sample_type}_usemlpforward={args.use_mlp_for_forward}_usemlpderivatives={args.use_mlp_for_derivatives}",
+            f"mlpinterp/method={args.method}_nt={args.n_t}_nx={args.n_x}_nlayers={args.n_layers}_hdim={args.hidden_dim}_activation={args.activation}_sample={args.sample_type}_usemlpforward={args.use_mlp_for_forward}_usemlpderivatives={args.use_mlp_for_derivatives}{collocation_suffix}",
         )
         # Logger setup
         logger = Logger(path=os.path.join(save_dir, "logger.json"))
@@ -612,26 +645,40 @@ if __name__ == "__main__":
         ic_weight = 10
 
         def pde_sampler():
+            # Determine sampling type based on argument
+            if args.mlpinterp_random_collocation:
+                sampling_type = "uniform"  # Random collocation points
+                print(f"Using random collocation points for MLPInterpolant")
+            else:
+                sampling_type = "standard"  # Fixed BWLer nodes
+                print(f"Using fixed BWLer nodes for MLPInterpolant")
+            
             t_nodes = pde.sample_domain_1d(
                 n_samples=n_t_train,
                 dim=0,
                 basis=bases[0],
-                type=args.sample_type,
+                type=sampling_type,
             )
             x_nodes = pde.sample_domain_1d(
                 n_samples=n_x_train,
                 dim=1,
                 basis=bases[1],
-                type=args.sample_type,
+                type=sampling_type,
             )
             return [t_nodes, x_nodes]
 
         def ic_sampler():
+            # Use same sampling type for IC nodes
+            if args.mlpinterp_random_collocation:
+                sampling_type = "uniform"
+            else:
+                sampling_type = "standard"
+            
             ic_nodes = pde.sample_domain_1d(
                 n_samples=n_ic_train,
                 dim=1,
                 basis=bases[1],
-                type=args.sample_type,
+                type=sampling_type,
             )
             return [torch.tensor([0.0], requires_grad=True, device=device), ic_nodes]
 
@@ -651,4 +698,7 @@ if __name__ == "__main__":
             lr_schedule=args.lr_schedule,
             gradient_clip=args.gradient_clip,
             hessian_every=args.hessian_every,
+            alternating_training=args.alternating_training,
+            n_adam_epochs=args.n_adam_epochs,
+            n_lbfgs_epochs=args.n_lbfgs_epochs,
         )

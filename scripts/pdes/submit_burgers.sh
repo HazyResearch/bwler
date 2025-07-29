@@ -31,3 +31,11 @@ CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers -
 
 # High-precision explicit BWLer
 #CUDA_VISIBLE_DEVICES=$DEVICE python -m src.experiments.pdes.benchmarks.burgers --n_t 321 --n_x 321 --n_epochs 850 --method nys_newton --sample_type standard --model polynomial_fd --eval_every 10 --from_pretrained --nncg_rank 1000 --nncg_cgmaxiters 2000 --fd_k 1
+
+# JL 7/28/25
+# Burgers, SSBroyden, MLP
+python -m src.experiments.pdes.benchmarks.burgers --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 10000 --method ssbroyden --sample_type standard --model mlp --eval_every 50
+# Burgers, SSBroyden, BWLer-hatted
+python -m src.experiments.pdes.benchmarks.burgers --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 10000 --method ssbroyden --sample_type standard --model mlpinterp --eval_every 50
+# Burgers, SSBroyden, BWLer
+python -m src.experiments.pdes.benchmarks.burgers --n_t 201 --n_x 201 --activation tanh --n_epochs 10000 --method ssbroyden --sample_type standard --model polynomial --eval_every 50

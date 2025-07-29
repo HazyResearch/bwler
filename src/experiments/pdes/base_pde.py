@@ -1551,8 +1551,8 @@ class BasePDE(BaseFcn):
         eval_sampler: Callable,
         eval_metrics: List[Callable],
         eval_every: int = 100,
-        n_adam_epochs: int = 10000,
-        n_lbfgs_epochs: int = 100,
+        n_adam_epochs: int = 90,
+        n_lbfgs_epochs: int = 10,
         save_dir: str = None,
         logger: Logger = None,
         hessian_every: int = -1,  # Add hessian_every parameter
@@ -1581,18 +1581,29 @@ class BasePDE(BaseFcn):
         ic_nodes = ic_sampler()
         eval_nodes = eval_sampler()
 
+        # Ensure tensors require gradients for L-BFGS
+        pde_nodes = [p.requires_grad_(True) for p in pde_nodes]
+        ic_nodes = [p.requires_grad_(True) for p in ic_nodes]
+
         # Define closure for L-BFGS that returns only the loss
         def lbfgs_closure():
             optimizer_lbfgs.zero_grad()
-            loss, pde_loss, ic_loss = self.get_pde_loss(
-                model,
-                pde_nodes,
-                ic_nodes,
-                ic_weight,
-                n_square_boundary=n_square_boundary,
-            )
-            loss.backward()
-            return loss
+            
+            # Ensure model is in training mode
+            model.train()
+            
+            # Ensure gradients are enabled
+            with torch.enable_grad():
+                loss, pde_loss, ic_loss = self.get_pde_loss(
+                    model,
+                    pde_nodes,
+                    ic_nodes,
+                    ic_weight,
+                    n_square_boundary=n_square_boundary,
+                )
+                
+                loss.backward()
+                return loss
 
         # Training loop
         for epoch in tqdm(range(n_epochs)):
@@ -1627,6 +1638,14 @@ class BasePDE(BaseFcn):
             else:
                 # Use L-BFGS
                 optimizer_type = "L-BFGS"
+                
+                # Sample fresh points for L-BFGS to ensure gradients are enabled
+                pde_nodes = pde_sampler()
+                ic_nodes = ic_sampler()
+                
+                # Ensure tensors require gradients
+                pde_nodes = [p.requires_grad_(True) for p in pde_nodes]
+                ic_nodes = [p.requires_grad_(True) for p in ic_nodes]
                 
                 # Update loss weights
                 self.update_loss_weights(epoch, model, optimizer_lbfgs, pde_nodes, ic_nodes)
@@ -1665,6 +1684,7 @@ class BasePDE(BaseFcn):
                             f"eval_{eval_metric.__name__}", eval_metric_value, epoch
                         )
 
+                with torch.enable_grad():
                     # Get losses for history
                     total_loss, pde_loss, ic_loss = self.get_pde_loss(
                         model,
@@ -1774,8 +1794,8 @@ class BasePDE(BaseFcn):
         hessian_num_iter: int = 100,
         hessian_num_run: int = 1,
         alternating_training: bool = False,  # New parameter for alternating training
-        n_adam_epochs: int = 10000,  # Number of Adam epochs per cycle
-        n_lbfgs_epochs: int = 100,   # Number of L-BFGS epochs per cycle
+        n_adam_epochs: int = 90,  # Number of Adam epochs per cycle
+        n_lbfgs_epochs: int = 10,   # Number of L-BFGS epochs per cycle
         **kwargs,
     ):
         # Route to alternating training if requested
