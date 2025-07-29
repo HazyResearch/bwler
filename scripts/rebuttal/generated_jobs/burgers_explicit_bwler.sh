@@ -12,4 +12,4 @@
 
 conda activate /pscratch/sd/j/jwl50/bwler/.pyenv
 
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 161 --n_x 161 --method ssbroyden --model polynomial
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 161 --n_x 161 --method ssbroyden --model polynomial --seed 0

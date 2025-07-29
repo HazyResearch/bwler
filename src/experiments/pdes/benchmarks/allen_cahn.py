@@ -13,6 +13,7 @@ from src.experiments.pdes.base_pde import BasePDE
 from src.models.interpolant_nd import SpectralInterpolationND
 from src.models.mlp_interpolant_nd import MLPSpectralInterpolationND
 from src.models.mlp import MLP
+from src.models.piratenet import PirateNet
 from src.utils.metrics import l2_error, max_error, l2_relative_error
 from src.optimizers.nys_newton_cg import NysNewtonCG
 from src.loggers.logger import Logger
@@ -953,4 +954,117 @@ if __name__ == "__main__":
                 logger=logger,
                 lr_schedule=args.lr_schedule,
                 gradient_clip=args.gradient_clip,
+            )
+
+    elif args.model == "piratenet":
+        save_dir = os.path.join(
+            base_save_dir,
+            f"piratenet/method={args.method}_nlayers={args.n_layers}_hdim={args.hidden_dim}_activation={args.activation}_sample={args.sample_type}",
+        )
+
+        # Logger setup
+        logger = Logger(path=os.path.join(save_dir, "logger.json"))
+
+        # Model setup
+        model_piratenet = PirateNet(
+            n_dim=2,
+            n_layers=args.n_layers,
+            hidden_dim=args.hidden_dim,
+            activation=args.activation,
+            device=device,
+        )
+
+        # Training setup
+        n_epochs = args.n_epochs
+        if args.method == "nys_newton":
+            optimizer = NysNewtonCG(
+                model_piratenet.parameters(),
+                lr=1,
+                rank=args.nncg_rank,
+                cg_max_iters=args.nncg_cgmaxiters,
+                mu=1e-2,
+                cg_tol=1e-16,
+                line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden" and ssbroyden_available:
+            optimizer = SSBroyden2(
+                model_piratenet.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden" and ssbroyden_available:
+            optimizer = L_SSBroyden(
+                model_piratenet.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        else:
+            optimizer = pde.get_optimizer(model_piratenet, args.method)
+
+        n_t_train = 321
+        n_x_train = 321
+        n_ic_train = 321
+        ic_weight = 10
+
+        def pde_sampler():
+            t_nodes = pde.sample_domain_1d(
+                n_samples=n_t_train,
+                dim=0,
+                basis="fourier",
+                type=args.sample_type,
+            )
+            x_nodes = pde.sample_domain_1d(
+                n_samples=n_x_train,
+                dim=1,
+                basis="fourier",
+                type=args.sample_type,
+            )
+            return [t_nodes, x_nodes]
+
+        def ic_sampler():
+            ic_nodes = pde.sample_domain_1d(
+                n_samples=n_ic_train,
+                dim=1,
+                basis="fourier",
+                type=args.sample_type,
+            )
+            return [torch.tensor([0.0], device=device, requires_grad=True), ic_nodes]
+
+        print(f"Training PirateNet with {args.method} optimizer...")
+        if args.use_mini_batch:
+            pde.train_model_mini_batch(
+                model_piratenet,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                batch_size=args.batch_size,
+                accumulate_grads=args.accumulate_grads,
+            )
+        else:
+            pde.train(
+                model_piratenet,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
             )

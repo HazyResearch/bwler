@@ -1,71 +1,119 @@
 # convection_mlp_ssbroyden
 # plots/pdes/rebuttal/convection/mlp_ssbroyden
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 0
+
+# convection_mlp_ssbroyden_seed1
+# plots/pdes/rebuttal/convection/mlp_ssbroyden_seed1
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 1
+
+# convection_mlp_ssbroyden_seed2
+# plots/pdes/rebuttal/convection/mlp_ssbroyden_seed2
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 2
 
 # convection_bwler_hat
 # plots/pdes/rebuttal/convection/bwler_hat
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 81 --n_x 80 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 81 --n_x 80 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp --seed 0
 
 # convection_explicit_bwler
 # plots/pdes/rebuttal/convection/explicit_bwler
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 81 --n_x 80 --method ssbroyden --model polynomial
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 81 --n_x 80 --method ssbroyden --model polynomial --seed 0
+
+# convection_piratenet
+# plots/pdes/rebuttal/convection/piratenet
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 1000000 --eval_every 1000 --method adam --method adam --model piratenet --seed 0
 
 # reaction_mlp_ssbroyden
 # plots/pdes/rebuttal/reaction/mlp_ssbroyden
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 0
+
+# reaction_mlp_ssbroyden_seed1
+# plots/pdes/rebuttal/reaction/mlp_ssbroyden_seed1
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 1
+
+# reaction_mlp_ssbroyden_seed2
+# plots/pdes/rebuttal/reaction/mlp_ssbroyden_seed2
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 2
 
 # reaction_bwler_hat
 # plots/pdes/rebuttal/reaction/bwler_hat
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 41 --n_x 41 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 41 --n_x 41 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp --seed 0
 
 # reaction_explicit_bwler
 # plots/pdes/rebuttal/reaction/explicit_bwler
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 81 --n_x 81 --method ssbroyden --model polynomial
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 81 --n_x 81 --method ssbroyden --model polynomial --seed 0
+
+# reaction_piratenet
+# plots/pdes/rebuttal/reaction/piratenet
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.reaction --rho 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 1000000 --eval_every 1000 --method adam --method adam --model piratenet --seed 0
 
 # wave_mlp_ssbroyden
 # plots/pdes/rebuttal/wave/mlp_ssbroyden
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 0
+
+# wave_mlp_ssbroyden_seed1
+# plots/pdes/rebuttal/wave/mlp_ssbroyden_seed1
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 1
+
+# wave_mlp_ssbroyden_seed2
+# plots/pdes/rebuttal/wave/mlp_ssbroyden_seed2
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 2
 
 # wave_bwler_hat
 # plots/pdes/rebuttal/wave/bwler_hat
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 41 --n_x 41 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 41 --n_x 41 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp --seed 0
 
 # wave_explicit_bwler
 # plots/pdes/rebuttal/wave/explicit_bwler
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 41 --n_x 41 --method ssbroyden --model polynomial
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_t 41 --n_x 41 --method ssbroyden --model polynomial --seed 0
+
+# wave_piratenet
+# plots/pdes/rebuttal/wave/piratenet
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.wave --c 2 --beta 5 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 1000000 --eval_every 1000 --method adam --method adam --model piratenet --seed 0
 
 # burgers_mlp_ssbroyden
 # plots/pdes/rebuttal/burgers/mlp_ssbroyden
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 0
 
 # burgers_bwler_hat
 # plots/pdes/rebuttal/burgers/bwler_hat
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp --seed 0
 
 # burgers_explicit_bwler
 # plots/pdes/rebuttal/burgers/explicit_bwler
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 161 --n_x 161 --method ssbroyden --model polynomial
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 161 --n_x 161 --method ssbroyden --model polynomial --seed 0
+
+# burgers_piratenet
+# plots/pdes/rebuttal/burgers/piratenet
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 1000000 --eval_every 1000 --method adam --method adam --model piratenet --seed 0
 
 # allen_cahn_mlp_ssbroyden
 # plots/pdes/rebuttal/allen_cahn/mlp_ssbroyden
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 0
 
 # allen_cahn_bwler_hat
 # plots/pdes/rebuttal/allen_cahn/bwler_hat
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp --seed 0
 
 # allen_cahn_explicit_bwler
 # plots/pdes/rebuttal/allen_cahn/explicit_bwler
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 161 --n_x 161 --method ssbroyden --model polynomial
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 161 --n_x 161 --method ssbroyden --model polynomial --seed 0
+
+# allen_cahn_piratenet
+# plots/pdes/rebuttal/allen_cahn/piratenet
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 1000000 --eval_every 1000 --method adam --method adam --model piratenet --seed 0
 
 # poisson_mlp_ssbroyden
 # plots/pdes/rebuttal/poisson/mlp_ssbroyden
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.poisson --n_epochs 1000000 --eval_every 50 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.poisson_2d_cg --n_epochs 1000000 --eval_every 50 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 0
 
 # poisson_bwler_hat
 # plots/pdes/rebuttal/poisson/bwler_hat
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.poisson --n_epochs 1000000 --eval_every 50 --n_x 51 --n_y 51 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.poisson_2d_cg --n_epochs 1000000 --eval_every 50 --n_x 51 --n_y 51 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp --seed 0
 
 # poisson_explicit_bwler
 # plots/pdes/rebuttal/poisson/explicit_bwler
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.poisson --n_epochs 1000000 --eval_every 50 --n_x 51 --n_y 51 --method ssbroyden --model polynomial
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.poisson_2d_cg --n_epochs 1000000 --eval_every 50 --n_x 51 --n_y 51 --method ssbroyden --model polynomial --seed 0
+
+# poisson_piratenet
+# plots/pdes/rebuttal/poisson/piratenet
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.poisson_2d_cg --n_epochs 1000000 --eval_every 50 --n_layers 3 --hidden_dim 256 --activation tanh --n_epochs 1000000 --eval_every 1000 --method adam --method adam --model piratenet --seed 0

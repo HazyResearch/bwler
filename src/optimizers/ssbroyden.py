@@ -277,9 +277,8 @@ class SSBroyden2(Optimizer):
         
         # Check for NaN in rho_k_minus
         if torch.isnan(rho_k_minus):
-            print(f"WARNING: rho_k_minus is NaN, skipping update")
-            self.state["H"] = H_k
-            return f_new
+            print(f"ERROR: rho_k_minus is NaN, ending optimization run")
+            raise RuntimeError("rho_k_minus is NaN - optimization cannot continue")
         
         # Add stability checks for divisions
         if torch.abs(a_k) < 1e-8:

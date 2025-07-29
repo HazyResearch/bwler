@@ -12,4 +12,4 @@
 
 conda activate /pscratch/sd/j/jwl50/bwler/.pyenv
 
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.allen_cahn --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlpinterp --seed 0

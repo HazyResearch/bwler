@@ -960,7 +960,88 @@ class BasePDE(BaseFcn):
         
         for epoch in tqdm(range(n_epochs)):
             # Optimize
-            loss = optimizer.step(closure)
+            try:
+                loss = optimizer.step(closure)
+            except RuntimeError as e:
+                if "rho_k_minus is NaN" in str(e):
+                    print(f"SSBroyden terminated due to NaN in rho_k_minus at epoch {epoch + 1}")
+                    print("Running final evaluation before ending training...")
+                    
+                    # Run final evaluation
+                    with torch.no_grad():
+                        u_eval = model(eval_nodes)
+                        u_true = self.get_solution(eval_nodes)
+
+                        # Calculate metrics
+                        metrics_values = {}
+                        for eval_metric in eval_metrics:
+                            eval_metric_value = eval_metric(u_eval, u_true)
+                            metrics_values[eval_metric.__name__] = eval_metric_value
+                            logger.log(
+                                f"eval_{eval_metric.__name__}", eval_metric_value, epoch
+                            )
+                    with torch.enable_grad():
+                        # Get losses for history
+                        _, pde_loss, ic_loss = self.get_pde_loss(
+                            model,
+                            pde_nodes,
+                            ic_nodes,
+                            ic_weight,
+                            n_square_boundary=n_square_boundary,
+                        )
+                        _, eval_pde_loss, _ = self.get_pde_loss(
+                            model,
+                            eval_nodes,
+                            ic_nodes,
+                            ic_weight,
+                            n_square_boundary=n_square_boundary,
+                        )
+                        logger.log("train_pde_loss", pde_loss.item(), epoch)
+                        logger.log("train_ic_loss", ic_loss.item(), epoch)
+                        logger.log("eval_pde_loss", eval_pde_loss.item(), epoch)
+
+                    current_time = time() - start_time
+                    print(f"Final evaluation at epoch {epoch + 1} (terminated early)")
+                    print(
+                        f"PDE loss: {logger.get_most_recent_value('train_pde_loss'):1.3e}"
+                    )
+                    print(f"IC loss: {logger.get_most_recent_value('train_ic_loss'):1.3e}")
+                    print(
+                        f"Evaluation L2 error: {logger.get_most_recent_value('eval_l2_error'):1.3e}"
+                    )
+                    print(
+                        f"Evaluation L2 relative error: {logger.get_most_recent_value('eval_l2_relative_error'):1.3e}"
+                    )
+                    
+                    # Save final checkpoint
+                    if save_dir is not None:
+                        torch.save(
+                            model.state_dict(),
+                            os.path.join(save_dir, f"checkpoint_final_early_termination.pth"),
+                        )
+                        
+                        # Plot final solution
+                        if self.__class__.__name__ == "Poisson2DCG":
+                            self.plot_solution(
+                                model,
+                                eval_nodes,
+                                u_eval,
+                                save_path=os.path.join(save_dir, f"{self.name}_solution_final_early_termination.png"),
+                            )
+                        else:
+                            self.plot_solution(
+                                eval_nodes,
+                                u_eval,
+                                save_path=os.path.join(save_dir, f"{self.name}_solution_final_early_termination.png"),
+                            )
+                    
+                    # Save history and exit
+                    logger.save()
+                    print("Training terminated early due to SSBroyden NaN issue")
+                    return
+                else:
+                    # Re-raise other RuntimeErrors
+                    raise e
 
             self.update_loss_weights(epoch, model, optimizer, pde_nodes, ic_nodes)
 
@@ -1904,6 +1985,10 @@ class BasePDE(BaseFcn):
                 ),  # Pass through n_square_boundary
             )
         else:
+            # Remove n_square_boundary from kwargs to avoid duplicate argument
+            train_kwargs = kwargs.copy()
+            train_kwargs.pop('n_square_boundary', None)
+            
             self.train_model(
                 model,
                 n_epochs,
@@ -1922,7 +2007,7 @@ class BasePDE(BaseFcn):
                 n_square_boundary=kwargs.get(
                     "n_square_boundary", 0
                 ),  # Pass through n_square_boundary
-                **kwargs,
+                **train_kwargs,
             )
             
     def train_model_mini_batch(

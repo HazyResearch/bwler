@@ -17,6 +17,7 @@ from src.experiments.pdes.base_pde import BasePDE
 from src.models.interpolant_nd import SpectralInterpolationND
 from src.models.mlp import MLP
 from src.models.mlp_interpolant_nd import MLPSpectralInterpolationND
+from src.models.piratenet import PirateNet
 
 """
 Laplace equation in 2D with complex geometry:
@@ -228,10 +229,10 @@ class Poisson2DCG(BasePDE):
             # Ensure pde_nodes and ic_nodes are in the right format
             if isinstance(pde_nodes, list):
                 # Convert list of tensors to single tensor
-                pde_nodes = torch.stack(pde_nodes, dim=1)
+                pde_nodes = torch.stack(pde_nodes, dim=1).requires_grad_(True)
             if isinstance(ic_nodes, list):
                 # Convert list of tensors to single tensor
-                ic_nodes = torch.stack(ic_nodes, dim=1)
+                ic_nodes = torch.stack(ic_nodes, dim=1).requires_grad_(True)
             
             # Compute solution at PDE points
             u_pde = model(pde_nodes)
@@ -309,10 +310,51 @@ class Poisson2DCG(BasePDE):
         """Plot the predicted solution, ground truth, error as scatter plots, and a pcolormesh as a new column."""
         import matplotlib
 
-        # nodes: [x, y], u: predicted solution at those nodes
-        x = nodes[:, 0].detach().cpu().numpy()
-        y = nodes[:, 1].detach().cpu().numpy()
+        # Add debug logging to understand tensor shapes
+        if self.debug:
+            print(f"plot_solution called with:")
+            print(f"  nodes type: {type(nodes)}")
+            if isinstance(nodes, list):
+                print(f"  nodes[0] shape: {nodes[0].shape}")
+                print(f"  nodes[1] shape: {nodes[1].shape}")
+            else:
+                print(f"  nodes shape: {nodes.shape}")
+            print(f"  u shape: {u.shape}")
+            print(f"  u dtype: {u.dtype}")
+
+        # Handle both list of tensors (spectral models) and single tensor (MLP models)
+        if isinstance(nodes, list):
+            # For spectral models: nodes is a list of tensors [x, y]
+            x = nodes[0].detach().cpu().numpy()
+            y = nodes[1].detach().cpu().numpy()
+        else:
+            # For MLP models: nodes is a single tensor with shape [N, 2]
+            x = nodes[:, 0].detach().cpu().numpy()
+            y = nodes[:, 1].detach().cpu().numpy()
+            
         u_pred = u.detach().cpu()
+        
+        # Add debug logging for u_pred shape
+        if self.debug:
+            print(f"  u_pred shape after detach().cpu(): {u_pred.shape}")
+            print(f"  x shape: {x.shape}, y shape: {y.shape}")
+        
+        # Ensure u_pred has the correct shape - it should be 1D with same length as x/y
+        if u_pred.dim() > 1:
+            # If it's a 2D tensor, we need to extract the diagonal or use proper indexing
+            if u_pred.shape[0] == u_pred.shape[1] and u_pred.shape[0] == x.shape[0]:
+                # It's a square matrix, extract the diagonal
+                u_pred = torch.diagonal(u_pred)
+            else:
+                # Try to flatten and take the first n elements
+                u_pred = u_pred.flatten()[:x.shape[0]]
+        if u_pred.shape[0] != x.shape[0]:
+            # If still wrong shape, try to reshape
+            u_pred = u_pred.flatten()[:x.shape[0]]
+            
+        if self.debug:
+            print(f"  u_pred shape after fixing: {u_pred.shape}")
+            
         u_true = self.get_solution(nodes).detach().cpu()
         error = u_pred - u_true
         u_pred = u_pred.numpy()
@@ -325,8 +367,17 @@ class Poisson2DCG(BasePDE):
         yg = np.linspace(-0.5, 0.5, grid_res)
         Xg, Yg = np.meshgrid(xg, yg)
         grid_points = np.stack([Xg.ravel(), Yg.ravel()], axis=-1)
+        
+        # Get the correct dtype and device from nodes
+        if isinstance(nodes, list):
+            dtype = nodes[0].dtype
+            device = nodes[0].device
+        else:
+            dtype = nodes.dtype
+            device = nodes.device
+            
         grid_points_torch = torch.tensor(
-            grid_points, dtype=nodes.dtype, device=nodes.device
+            grid_points, dtype=dtype, device=device
         )
         with torch.no_grad():
             u_grid = u.new_zeros(grid_points_torch.shape[0])
@@ -394,8 +445,24 @@ class Poisson2DCG(BasePDE):
 
     def get_solution(self, nodes: List[torch.Tensor]) -> torch.Tensor:
         """Get the reference solution values at the given nodes by nearest neighbor lookup."""
-        # nodes: [x, y], each of shape (N,)
-        x, y = nodes[:, 0], nodes[:, 1]
+        # Add debug logging to understand the format of nodes
+        if self.debug:
+            print(f"get_solution called with nodes type: {type(nodes)}")
+            if isinstance(nodes, list):
+                print(f"nodes is a list with {len(nodes)} elements")
+                for i, node in enumerate(nodes):
+                    print(f"  nodes[{i}] shape: {node.shape}, type: {type(node)}")
+            else:
+                print(f"nodes shape: {nodes.shape}, type: {type(nodes)}")
+        
+        # Handle both list of tensors (spectral models) and single tensor (MLP models)
+        if isinstance(nodes, list):
+            # For spectral models: nodes is a list of tensors [x, y]
+            x, y = nodes[0], nodes[1]
+        else:
+            # For MLP models: nodes is a single tensor with shape [N, 2]
+            x, y = nodes[:, 0], nodes[:, 1]
+            
         ref_x = self.ref_points[:, 0]
         ref_y = self.ref_points[:, 1]
         # For each (x, y), find the closest point in ref_points
@@ -604,7 +671,7 @@ class Poisson2DCG(BasePDE):
         return valid_points.clone().requires_grad_(True)
 
     def eval_sampler(self):
-        return self.ref_points
+        return self.ref_points.requires_grad_(True)
 
 
 if __name__ == "__main__":
@@ -723,18 +790,20 @@ if __name__ == "__main__":
     else:
         print("CUDA is not available. Using CPU.\n")
 
+    # Print training header
+    print("\033[94m" + "=" * 80 + "\033[0m")
+    print("\033[94m TRAINING SPECTRAL INTERPOLANT ON POISSON 2D CG DOMAIN... \033[0m")
+    print("\033[94m" + "=" * 80 + "\033[0m")
+
     # ========================
     # Reference Solution
     # ========================
 
-    pde = Poisson2DCG(device="cuda", debug=True)
+    pde = Poisson2DCG(device="cuda", debug=False)
 
     # ========================
     # Spectral Interpolant Model Setup
     # ========================
-    print("\033[94m" + "=" * 80 + "\033[0m")
-    print("\033[94m TRAINING SPECTRAL INTERPOLANT ON POISSON 2D CG DOMAIN... \033[0m")
-    print("\033[94m" + "=" * 80 + "\033[0m")
 
     # Model configuration
     n_x = args.n_x
@@ -763,6 +832,14 @@ if __name__ == "__main__":
             device=pde.device,
             hidden_layers=(args.hidden_dim,) * args.n_layers,
             activation=getattr(torch, args.activation),
+        )
+    elif args.model == "piratenet":
+        model_spec = PirateNet(
+            n_dim=2,
+            n_layers=args.n_layers,
+            hidden_dim=args.hidden_dim,
+            activation=args.activation,
+            device=pde.device,
         )
     else:
         raise ValueError(f"Unsupported model type: {args.model}")
@@ -862,7 +939,7 @@ if __name__ == "__main__":
     def eval_sampler():
         if args.model == "mlp":
             # For MLP models, return a single tensor with shape [N_eval_points, 2]
-            return pde.ref_points
+            return pde.eval_sampler()
         else:
             # For spectral models, return list of tensors
             eval_points = pde.ref_points
@@ -896,6 +973,7 @@ if __name__ == "__main__":
     )
 
     # Evaluate and plot the final solution
+    # Training complete
     print("\033[92m" + "=" * 80 + "\033[0m")
     print("\033[92m TRAINING COMPLETE! \033[0m")
     print("\033[92m" + "=" * 80 + "\033[0m")

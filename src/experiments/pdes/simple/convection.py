@@ -9,6 +9,7 @@ from src.experiments.pdes.base_pde import BasePDE
 from src.models.interpolant_nd import SpectralInterpolationND
 from src.models.mlp_interpolant_nd import MLPSpectralInterpolationND
 from src.models.mlp import MLP
+from src.models.piratenet import PirateNet
 from src.utils.metrics import l2_error, max_error, l2_relative_error
 from src.loggers.logger import Logger
 
@@ -220,6 +221,18 @@ if __name__ == "__main__":
         type=int,
         default=-1,
         help="How often to compute Hessian during training (-1 for never)",
+    )
+    args.add_argument(
+        "--hessian_num_iter",
+        type=int,
+        default=100,
+        help="Number of iterations for Hessian computation",
+    )
+    args.add_argument(
+        "--hessian_num_run",
+        type=int,
+        default=1,
+        help="Number of runs for Hessian computation",
     )
 
     # Add alternating training arguments
@@ -448,9 +461,114 @@ if __name__ == "__main__":
             lr_schedule=args.lr_schedule,
             gradient_clip=args.gradient_clip,
             hessian_every=args.hessian_every,
-            alternating_training=args.alternating_training,
-            n_adam_epochs=args.n_adam_epochs,
-            n_lbfgs_epochs=args.n_lbfgs_epochs,
+            hessian_num_iter=args.hessian_num_iter,
+            hessian_num_run=args.hessian_num_run,
+        )
+
+    elif args.model == "piratenet":
+        save_dir = os.path.join(
+            base_save_dir,
+            f"piratenet/method={args.method}_nlayers={args.n_layers}_hdim={args.hidden_dim}_activation={args.activation}_sample={args.sample_type}",
+        )
+        # Logger setup
+        logger = Logger(path=os.path.join(save_dir, "logger.json"))
+
+        # Model setup
+        model_piratenet = PirateNet(
+            n_dim=2,
+            n_layers=args.n_layers,
+            hidden_dim=args.hidden_dim,
+            activation=args.activation,
+            device=device,
+        )
+
+        # Training setup
+        n_epochs = args.n_epochs
+        if args.method == "nys_newton":
+            from src.optimizers.nys_newton_cg import NysNewtonCG
+
+            optimizer = NysNewtonCG(
+                model_piratenet.parameters(),
+                lr=1,
+                rank=args.nncg_rank,
+                cg_max_iters=args.nncg_cgmaxiters,
+                mu=1e-2,
+                cg_tol=1e-16,
+                line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden":
+            from src.optimizers.ssbroyden import SSBroyden2
+            
+            optimizer = SSBroyden2(
+                model_piratenet.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden":
+            from src.optimizers.Lssbroyden import L_SSBroyden
+            
+            optimizer = L_SSBroyden(
+                model_piratenet.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        else:
+            optimizer = pde.get_optimizer(model_piratenet, args.method)
+
+        n_t_train = 2 * c + 1
+        n_x_train = 2 * c
+        n_ic_train = 2 * c
+        ic_weight = 10
+
+        def pde_sampler():
+            t_nodes = pde.sample_domain_1d(
+                n_samples=n_t_train,
+                dim=0,
+                basis="fourier",
+                type=args.sample_type,
+            )
+            x_nodes = pde.sample_domain_1d(
+                n_samples=n_x_train,
+                dim=1,
+                basis="fourier",
+                type=args.sample_type,
+            )
+            return [t_nodes, x_nodes]
+
+        def ic_sampler():
+            ic_nodes = pde.sample_domain_1d(
+                n_samples=n_ic_train,
+                dim=1,
+                basis="fourier",
+                type=args.sample_type,
+            )
+            return [torch.tensor([0.0], requires_grad=True, device=device), ic_nodes]
+
+        print(f"Training PirateNet with {args.method} optimizer...")
+        pde.train(
+            model_piratenet,
+            n_epochs=args.n_epochs,
+            optimizer=optimizer,
+            pde_sampler=pde_sampler,
+            ic_sampler=ic_sampler,
+            ic_weight=ic_weight,
+            eval_sampler=eval_sampler,
+            eval_metrics=eval_metrics,
+            eval_every=eval_every,
+            save_dir=save_dir,
+            logger=logger,
+            lr_schedule=args.lr_schedule,
+            gradient_clip=args.gradient_clip,
+            hessian_every=args.hessian_every,
+            hessian_num_iter=args.hessian_num_iter,
+            hessian_num_run=args.hessian_num_run,
         )
 
     #########################################################

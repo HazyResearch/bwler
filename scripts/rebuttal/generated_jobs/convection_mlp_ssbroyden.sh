@@ -12,4 +12,4 @@
 
 conda activate /pscratch/sd/j/jwl50/bwler/.pyenv
 
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.simple.convection --c 40 --n_epochs 20000 --eval_every 50 --sample_type standard --n_layers 3 --hidden_dim 32 --activation tanh --method ssbroyden --model mlp --seed 0

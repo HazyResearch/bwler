@@ -26,6 +26,7 @@ class JobCommand:
     command: str
     job_name: str
     save_dir: str
+    seed: int = 0
 
 class SweepManager:
     def __init__(self, base_dir: str = "scripts/rebuttal"):
@@ -65,6 +66,14 @@ class SweepManager:
                         "n_t": 81,
                         "n_x": 80,
                     },
+                    "piratenet": {
+                        "n_layers": 3,
+                        "hidden_dim": 256,
+                        "activation": "tanh",
+                        "n_epochs": 1000000,
+                        "eval_every": 1000,
+                        "method": "adam",
+                    },
                 }
             ),
             "reaction": ProblemConfig(
@@ -92,6 +101,14 @@ class SweepManager:
                     "explicit_bwler": {
                         "n_t": 81,
                         "n_x": 81,
+                    },
+                    "piratenet": {
+                        "n_layers": 3,
+                        "hidden_dim": 256,
+                        "activation": "tanh",
+                        "n_epochs": 1000000,
+                        "eval_every": 1000,
+                        "method": "adam",
                     },
                 }
             ),
@@ -122,6 +139,14 @@ class SweepManager:
                         "n_t": 41,
                         "n_x": 41,
                     },
+                    "piratenet": {
+                        "n_layers": 3,
+                        "hidden_dim": 256,
+                        "activation": "tanh",
+                        "n_epochs": 1000000,
+                        "eval_every": 1000,
+                        "method": "adam",
+                    },
                 }
             ),
             "burgers": ProblemConfig(
@@ -148,6 +173,14 @@ class SweepManager:
                     "explicit_bwler": {
                         "n_t": 161,
                         "n_x": 161,
+                    },
+                    "piratenet": {
+                        "n_layers": 3,
+                        "hidden_dim": 256,
+                        "activation": "tanh",
+                        "n_epochs": 1000000,
+                        "eval_every": 1000,
+                        "method": "adam",
                     },
                 }
             ),
@@ -176,6 +209,14 @@ class SweepManager:
                         "n_t": 161,
                         "n_x": 161,
                     },
+                    "piratenet": {
+                        "n_layers": 3,
+                        "hidden_dim": 256,
+                        "activation": "tanh",
+                        "n_epochs": 1000000,
+                        "eval_every": 1000,
+                        "method": "adam",
+                    },
                 }
             ),
             "poisson": ProblemConfig(
@@ -202,12 +243,20 @@ class SweepManager:
                         "n_x": 51,
                         "n_y": 51,
                     },
+                    "piratenet": {
+                        "n_layers": 3,
+                        "hidden_dim": 256,
+                        "activation": "tanh",
+                        "n_epochs": 1000000,
+                        "eval_every": 1000,
+                        "method": "adam",
+                    },
                 }
             ),
         }
     
     def _build_command(self, problem: str, method: str, model: str, 
-                      base_args: Dict, model_params: Dict) -> JobCommand:
+                      base_args: Dict, model_params: Dict, seed: int = 0) -> JobCommand:
         """Build a job command for a specific configuration."""
         
         # Map method to actual optimizer and model type
@@ -215,13 +264,17 @@ class SweepManager:
             "mlp_ssbroyden": ("ssbroyden", "mlp"),
             "bwler_hat": ("ssbroyden", "mlpinterp"),
             "explicit_bwler": ("ssbroyden", "polynomial"),
+            "piratenet": ("adam", "piratenet"),
         }
         
         optimizer, model_type = method_mapping[method]
         
         # Determine the module path based on problem type
         if problem in ["burgers", "poisson", "allen_cahn"]:
-            module_path = f"src.experiments.pdes.benchmarks.{problem}"
+            if problem == "poisson":
+                module_path = "src.experiments.pdes.benchmarks.poisson_2d_cg"
+            else:
+                module_path = f"src.experiments.pdes.benchmarks.{problem}"
         else:
             module_path = f"src.experiments.pdes.simple.{problem}"
         
@@ -250,11 +303,16 @@ class SweepManager:
         # Add method and model
         cmd_parts.extend([f"--method {optimizer}", f"--model {model_type}"])
         
+        # Add seed
+        cmd_parts.append(f"--seed {seed}")
+        
         command = " ".join(cmd_parts)
         
         # Generate job name and save directory
-        job_name = f"{problem}_{method}"
+        job_name = f"{problem}_{method}_seed{seed}" if seed > 0 else f"{problem}_{method}"
         save_dir = f"plots/pdes/rebuttal/{problem}/{method}"
+        if seed > 0:
+            save_dir += f"_seed{seed}"
         
         return JobCommand(
             problem=problem,
@@ -262,7 +320,8 @@ class SweepManager:
             model=model_type,
             command=command,
             job_name=job_name,
-            save_dir=save_dir
+            save_dir=save_dir,
+            seed=seed
         )
     
     def generate_all_jobs(self) -> List[JobCommand]:
@@ -271,11 +330,21 @@ class SweepManager:
         
         for problem_name, problem_config in self.problems.items():
             for method_name, model_params in problem_config.model_params.items():
-                job = self._build_command(
-                    problem_name, method_name, method_name,
-                    problem_config.base_args, model_params
-                )
-                jobs.append(job)
+                # For simple PDEs, run SSBroyden experiments 3 times with different seeds
+                if problem_name in ["convection", "reaction", "wave"] and method_name == "mlp_ssbroyden":
+                    for seed in [0, 1, 2]:
+                        job = self._build_command(
+                            problem_name, method_name, method_name,
+                            problem_config.base_args, model_params, seed
+                        )
+                        jobs.append(job)
+                else:
+                    # For all other experiments, run once with seed 0
+                    job = self._build_command(
+                        problem_name, method_name, method_name,
+                        problem_config.base_args, model_params, 0
+                    )
+                    jobs.append(job)
         
         return jobs
     
