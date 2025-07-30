@@ -388,8 +388,8 @@ conda activate /pscratch/sd/j/jwl50/bwler/.pyenv
 {job.command}
 """)
                 
-                # Add to master script with full path
-                f.write(f"sbatch {job_script}\n")
+                # Add to master script with relative path from root directory
+                f.write(f"sbatch {self.output_dir.relative_to(Path.cwd())}/{job.job_name}.sh\n")
         
         # Make scripts executable
         os.chmod(master_script, 0o755)
@@ -429,9 +429,8 @@ def main():
     
     print(f"\nJob list saved to: {job_list_file}")
     print(f"\nTotal jobs: {len(jobs)}")
-    print("\nTo submit all jobs:")
-    print(f"cd {manager.output_dir}")
-    print("bash submit_all.sh")
+    print("\nTo submit all jobs from the root directory:")
+    print(f"bash {manager.output_dir.relative_to(Path.cwd())}/submit_all.sh")
 
 if __name__ == "__main__":
     main() 

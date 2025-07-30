@@ -252,7 +252,8 @@ class SSBroyden2(Optimizer):
 
         # ρ_k^‑, θ_k, τ_k   (cf. Urbán et al.)
         # Check if sqrt argument would be negative
-        sqrt_arg = torch.abs(a_k) / (1 + a_k)
+        # sqrt_arg = torch.abs(a_k) / (1 + a_k) # TODO JL 6/30/25. Leading to negative sqrt_arg.
+        sqrt_arg = torch.abs(torch.abs(a_k) / (1 + a_k))
         
         # Store last good sqrt_arg for fallback
         if not hasattr(self, '_last_good_sqrt_arg'):

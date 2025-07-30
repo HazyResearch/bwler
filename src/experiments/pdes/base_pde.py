@@ -1372,6 +1372,24 @@ class BasePDE(BaseFcn):
         if logger is None:
             logger = Logger(path=os.path.join(save_dir, "logger.json"))
 
+        # Log warm start strategy for validation
+        print(f"=== Adam-SSBroyden Warm Start Strategy ===")
+        print(f"Total epochs: {n_epochs}")
+        print(f"Adam warm start epochs: {n_adam_epochs}")
+        print(f"SSBroyden epochs: {n_epochs - n_adam_epochs}")
+        print(f"Warm start percentage: {n_adam_epochs/n_epochs*100:.1f}%")
+        
+        # Log initial model state for validation
+        # Note: We need gradients enabled for loss computation, so no torch.no_grad()
+        self.initial_loss_value = self.get_pde_loss(
+            model,
+            pde_sampler(),
+            ic_sampler(),
+            ic_weight,
+            n_square_boundary=n_square_boundary,
+        )[0]
+        print(f"Initial loss before warm start: {self.initial_loss_value.item():.6e}")
+        
         print(f"Training model with Adam ({n_adam_epochs} epochs) + SSBroyden ({n_epochs - n_adam_epochs} epochs)...")
         
         # Create optimizers
@@ -1465,6 +1483,31 @@ class BasePDE(BaseFcn):
                 # Switch message (only print once)
                 if epoch == n_adam_epochs:
                     print(f"Switching to SSBroyden optimization at epoch {epoch}...")
+                    
+                    # Log validation metrics at transition
+                    # Compute loss with gradients enabled, then detach for logging
+                    transition_loss = self.get_pde_loss(
+                        model,
+                        pde_nodes_fixed,
+                        ic_nodes_fixed,
+                        ic_weight,
+                        n_square_boundary=n_square_boundary,
+                    )[0]
+                    transition_loss_value = transition_loss.item()  # Detach for logging
+                    print(f"=== Transition Validation ===")
+                    print(f"Loss at transition: {transition_loss_value:.6e}")
+                    print(f"Loss improvement from initial: {self.initial_loss_value.item() - transition_loss_value:.6e}")
+                    print(f"Relative improvement: {(self.initial_loss_value.item() - transition_loss_value) / self.initial_loss_value.item() * 100:.2f}%")
+                    
+                    # Log parameter statistics
+                    total_params = 0
+                    param_norm = 0.0
+                    for param in model.parameters():
+                        total_params += param.numel()
+                        param_norm += torch.norm(param).item() ** 2
+                    param_norm = param_norm ** 0.5
+                    print(f"Parameter norm at transition: {param_norm:.6e}")
+                    print(f"Average parameter magnitude: {param_norm / total_params:.6e}")
 
                 # Update loss weights
                 self.update_loss_weights(epoch, model, optimizer_ssbroyden, pde_nodes, ic_nodes)
@@ -1945,24 +1988,25 @@ class BasePDE(BaseFcn):
                 **kwargs,
             )
         elif isinstance(optimizer, SSBroyden2):
-            self.train_model_ssbroyden(
+            # Use Adam warm start followed by SSBroyden
+            print("Using Adam warm start followed by SSBroyden optimization...")
+            
+            self.train_adam_ssbroyden(
                 model,
                 n_epochs,
-                optimizer,
                 pde_sampler,
                 ic_sampler,
                 ic_weight,
                 eval_sampler,
                 eval_metrics,
+                n_adam_epochs=1000,  # Default to 1000 Adam epochs
                 eval_every=eval_every,
                 save_dir=save_dir,
                 logger=logger,
                 hessian_every=hessian_every,
                 hessian_num_iter=hessian_num_iter,
                 hessian_num_run=hessian_num_run,
-                n_square_boundary=kwargs.get(
-                    "n_square_boundary", 0
-                ),  # Pass through n_square_boundary
+                **kwargs,
             )
         elif isinstance(optimizer, L_SSBroyden):
             self.train_model_Lssbroyden(

@@ -23,10 +23,12 @@ sbatch scripts/rebuttal/generated_jobs/burgers_mlp_ssbroyden.sh
 sbatch scripts/rebuttal/generated_jobs/burgers_bwler_hat.sh
 sbatch scripts/rebuttal/generated_jobs/burgers_explicit_bwler.sh
 sbatch scripts/rebuttal/generated_jobs/burgers_piratenet.sh
+sbatch scripts/rebuttal/generated_jobs/burgers_mlpinterp_temporal.sh
 sbatch scripts/rebuttal/generated_jobs/allen_cahn_mlp_ssbroyden.sh
 sbatch scripts/rebuttal/generated_jobs/allen_cahn_bwler_hat.sh
 sbatch scripts/rebuttal/generated_jobs/allen_cahn_explicit_bwler.sh
 sbatch scripts/rebuttal/generated_jobs/allen_cahn_piratenet.sh
+sbatch scripts/rebuttal/generated_jobs/allen_cahn_mlpinterp_temporal.sh
 sbatch scripts/rebuttal/generated_jobs/poisson_mlp_ssbroyden.sh
 sbatch scripts/rebuttal/generated_jobs/poisson_bwler_hat.sh
 sbatch scripts/rebuttal/generated_jobs/poisson_explicit_bwler.sh

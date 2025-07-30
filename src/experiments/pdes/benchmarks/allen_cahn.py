@@ -12,6 +12,7 @@ from time import time
 from src.experiments.pdes.base_pde import BasePDE
 from src.models.interpolant_nd import SpectralInterpolationND
 from src.models.mlp_interpolant_nd import MLPSpectralInterpolationND
+from src.models.mlp_interpolant_temporal_nd import MLPTemporalSpectralInterpolation
 from src.models.mlp import MLP
 from src.models.piratenet import PirateNet
 from src.utils.metrics import l2_error, max_error, l2_relative_error
@@ -923,6 +924,150 @@ if __name__ == "__main__":
             return [torch.tensor([0.0], device=device, requires_grad=True), ic_nodes]
 
         print(f"\nTraining MLP Interpolant with {args.method} optimizer...")
+        if args.use_mini_batch:
+            pde.train_model_mini_batch(
+                model,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                lr_schedule=args.lr_schedule,
+                gradient_clip=args.gradient_clip,
+                batch_size=args.batch_size,
+                accumulate_grads=args.accumulate_grads,
+            )
+        else:
+            pde.train(
+                model,
+                n_epochs=args.n_epochs,
+                optimizer=optimizer,
+                pde_sampler=pde_sampler,
+                ic_sampler=ic_sampler,
+                ic_weight=ic_weight,
+                eval_sampler=eval_sampler,
+                eval_metrics=eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                lr_schedule=args.lr_schedule,
+                gradient_clip=args.gradient_clip,
+            )
+
+    #########################################################
+    # 3b. Temporal MLP Interpolant
+    #########################################################
+    if args.model is None or args.model == "mlpinterp_temporal":
+        # Add collocation type to save directory
+        collocation_suffix = "_random_collocation" if args.mlpinterp_random_collocation else "_fixed_collocation"
+        
+        save_dir = os.path.join(
+            base_save_dir,
+            f"mlpinterp_temporal/method={args.method}_nt={args.n_t}_nx={args.n_x}_nlayers={args.n_layers}_hdim={args.hidden_dim}_activation={args.activation}_sample={args.sample_type}{collocation_suffix}",
+        )
+        # Logger setup
+        logger = Logger(path=os.path.join(save_dir, "logger.json"))
+
+        # Model setup
+        n_t = args.n_t
+        n_x = args.n_x
+        bases = ["chebyshev", "chebyshev"]
+        try:
+            activation = getattr(torch, args.activation)
+        except AttributeError:
+            raise ValueError(f"Invalid activation function: {args.activation}")
+
+        model = MLPTemporalSpectralInterpolation(
+            Ns=[n_t, n_x],
+            bases=bases,
+            domains=pde.domain,
+            device=device,
+            hidden_layers=(args.hidden_dim,) * args.n_layers,
+            activation=activation,
+        )
+
+        # Training setup
+        n_epochs = args.n_epochs
+        if args.method == "nys_newton":
+            optimizer = NysNewtonCG(
+                model.parameters(),
+                lr=1,
+                rank=args.nncg_rank,
+                cg_max_iters=args.nncg_cgmaxiters,
+                mu=1e-2,
+                cg_tol=1e-16,
+                line_search_fn="armijo",
+            )
+        elif args.method == "ssbroyden" and ssbroyden_available:
+            optimizer = SSBroyden2(
+                model.parameters(),
+                lr=1.0,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        elif args.method == "lssbroyden" and ssbroyden_available:
+            optimizer = L_SSBroyden(
+                model.parameters(),
+                lr=1.0,
+                history_size=10,
+                init_scale=True,
+                c1=1e-4,
+                c2=0.9,
+                max_ls=20,
+            )
+        else:
+            optimizer = pde.get_optimizer(model, args.method)
+
+        n_t_train = 321*2
+        n_x_train = 321*2
+        n_ic_train = 321*2
+        ic_weight = 10
+
+        def pde_sampler():
+            # Determine sampling type based on argument
+            if args.mlpinterp_random_collocation:
+                sampling_type = "uniform"  # Random collocation points
+                print(f"Using random collocation points for Temporal MLPInterpolant")
+            else:
+                sampling_type = "standard"  # Fixed BWLer nodes
+            
+            t_nodes = pde.sample_domain_1d(
+                n_samples=n_t_train,
+                dim=0,
+                basis=bases[0],
+                type=sampling_type,
+            )
+            x_nodes = pde.sample_domain_1d(
+                n_samples=n_x_train,
+                dim=1,
+                basis=bases[1],
+                type=sampling_type,
+            )
+            return [t_nodes, x_nodes]
+
+        def ic_sampler():
+            # Use same sampling type for IC nodes
+            if args.mlpinterp_random_collocation:
+                sampling_type = "uniform"
+            else:
+                sampling_type = "standard"
+            
+            ic_nodes = pde.sample_domain_1d(
+                n_samples=n_ic_train,
+                dim=1,
+                basis=bases[1],
+                type=sampling_type,
+            )
+            return [torch.tensor([0.0], device=device, requires_grad=True), ic_nodes]
+
+        print(f"\nTraining Temporal MLP Interpolant with {args.method} optimizer...")
         if args.use_mini_batch:
             pde.train_model_mini_batch(
                 model,
