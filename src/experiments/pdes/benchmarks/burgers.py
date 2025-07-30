@@ -521,9 +521,11 @@ if __name__ == "__main__":
     args.add_argument("--mlpinterp_random_collocation", action="store_true", 
                      help="Use random collocation points for MLPInterpolant (default: fixed BWLer nodes)")
 
+    args.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
+
     args = args.parse_args()
 
-    torch.random.manual_seed(0)
+    torch.random.manual_seed(args.seed)
     torch.set_default_dtype(torch.float64)
     device = "cuda"
 

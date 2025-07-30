@@ -268,9 +268,11 @@ if __name__ == "__main__":
     args.add_argument("--pretrained_mlp_path", type=str, default=None,
                      help="Path to pretrained MLP checkpoint to initialize polynomial model")
 
+    args.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
+
     args = args.parse_args()
 
-    torch.random.manual_seed(0)
+    torch.random.manual_seed(args.seed)
     torch.set_default_dtype(torch.float64)
     device = "cuda"
 

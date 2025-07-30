@@ -771,8 +771,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Use MLP autograd for derivatives in MLPSpectralInterpolationND",
     )
+    parser.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
 
     args = parser.parse_args()
+
+    # Set random seed for reproducibility
+    torch.random.manual_seed(args.seed)
 
     base_dir = args.base_dir
     os.makedirs(base_dir, exist_ok=True)
