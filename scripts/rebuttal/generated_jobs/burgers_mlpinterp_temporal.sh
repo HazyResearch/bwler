@@ -14,4 +14,4 @@ conda activate /pscratch/sd/j/jwl50/bwler/.pyenv
 
 CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 321 --n_x 321 --n_layers 3 --hidden_dim 64 --activation tanh --method ssbroyden --model mlpinterp_temporal --seed 0
 CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 641 --n_x 641 --n_layers 3 --hidden_dim 64 --activation tanh --method ssbroyden --model mlpinterp_temporal --seed 0
-CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 1281 --n_x 1281 --n_layers 3 --hidden_dim 64 --activation tanh --method ssbroyden --model mlpinterp_temporal --seed 0
+CUDA_VISIBLE_DEVICES=0 python -m src.experiments.pdes.benchmarks.burgers --n_epochs 1000000 --eval_every 50 --sample_type standard --n_t 1001 --n_x 1001 --n_layers 3 --hidden_dim 64 --activation tanh --method ssbroyden --model mlpinterp_temporal --seed 0
