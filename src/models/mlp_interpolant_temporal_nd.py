@@ -299,15 +299,12 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
         return self._compute_node_values().detach().clone()
 
     def load_values_from_model(self, model: nn.Module):
-        """Load nodal values from another model (e.g., for initialization)."""
-        # Get the nodal values from the other model
-        if hasattr(model, 'nodal_values'):
-            # If the model has nodal_values method, use it
-            other_values = model.nodal_values()
+        """Load MLP weights from another model (e.g., for initialization from pretrained MLP)."""
+        # Check if the model is an MLP (which is what we expect for warm start)
+        if hasattr(model, 'state_dict'):
+            # Copy the MLP weights directly
+            with torch.no_grad():
+                self.mlp.load_state_dict(model.state_dict())
+            print(f"Successfully loaded MLP weights from pretrained model")
         else:
-            # Otherwise, evaluate the model at the grid points
-            other_values = model(self._flat_coords).reshape(*self.Ns)
-        
-        # Update the buffer (this will be used by the MLP)
-        with torch.no_grad():
-            self.values.copy_(other_values) 
+            raise ValueError("Expected model to have state_dict method for weight loading") 

@@ -266,10 +266,15 @@ if __name__ == "__main__":
                      help="Use random collocation points for MLPInterpolant (default: fixed BWLer nodes)")
 
     # Add pretrained MLP initialization
-    args.add_argument("--pretrained_mlp_path", type=str, default=None,
-                     help="Path to pretrained MLP checkpoint to initialize polynomial model")
+    args.add_argument("--pretrained_mlp_path", type=str, 
+                     default="/pscratch/sd/j/jwl50/bwler/plots/pdes/allen_cahn/eps=0.0001/cameraready_20250730_142948/mlp/method=ssbroyden_nlayers=3_hdim=64_sample=standard/checkpoint_13699.pth",
+                     help="Path to pretrained MLP checkpoint to initialize models")
 
     args.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
+    
+    # Add parameter to disable Adam warmstart for SSBroyden
+    args.add_argument("--disable_adam_warmstart", action="store_true", 
+                     help="Disable Adam warmstart for SSBroyden optimizers (useful for warm-starting from pretrained models)")
 
     args = args.parse_args()
 
@@ -424,6 +429,7 @@ if __name__ == "__main__":
                 eval_every=eval_every,
                 save_dir=save_dir,
                 logger=logger,
+                disable_adam_warmstart=args.disable_adam_warmstart,
             )
 
     #########################################################
@@ -633,6 +639,7 @@ if __name__ == "__main__":
                 eval_every=eval_every,
                 save_dir=save_dir,
                 logger=logger,
+                disable_adam_warmstart=args.disable_adam_warmstart,
             )
 
     #########################################################
@@ -812,6 +819,7 @@ if __name__ == "__main__":
                 eval_every=eval_every,
                 save_dir=save_dir,
                 logger=logger,
+                disable_adam_warmstart=args.disable_adam_warmstart,
             )
 
     #########################################################
@@ -957,6 +965,7 @@ if __name__ == "__main__":
                 logger=logger,
                 lr_schedule=args.lr_schedule,
                 gradient_clip=args.gradient_clip,
+                disable_adam_warmstart=args.disable_adam_warmstart,
             )
 
     #########################################################
@@ -966,9 +975,12 @@ if __name__ == "__main__":
         # Add collocation type to save directory
         collocation_suffix = "_random_collocation" if args.mlpinterp_random_collocation else "_fixed_collocation"
         
+        # Add warm start suffix if using pretrained MLP
+        warm_start_suffix = "_from_pretrained" if args.pretrained_mlp_path is not None else ""
+        
         save_dir = os.path.join(
             base_save_dir,
-            f"mlpinterp_temporal/method={args.method}_nt={args.n_t}_nx={args.n_x}_nlayers={args.n_layers}_hdim={args.hidden_dim}_activation={args.activation}_sample={args.sample_type}{collocation_suffix}",
+            f"mlpinterp_temporal/method={args.method}_nt={args.n_t}_nx={args.n_x}_nlayers={args.n_layers}_hdim={args.hidden_dim}_activation={args.activation}_sample={args.sample_type}{collocation_suffix}{warm_start_suffix}",
         )
         # Logger setup
         logger = Logger(path=os.path.join(save_dir, "logger.json"))
@@ -991,6 +1003,99 @@ if __name__ == "__main__":
             activation=activation,
         )
 
+        # Initialize from pretrained MLP if specified
+        if args.pretrained_mlp_path is not None:
+            print(f"Initializing temporal MLP interpolant from pretrained MLP: {args.pretrained_mlp_path}")
+            
+            # Infer MLP architecture from path
+            path_parts = args.pretrained_mlp_path.split('/')
+            inferred_n_layers = None
+            inferred_hidden_dim = None
+            
+            for part in path_parts:
+                if 'nlayers=' in part:
+                    inferred_n_layers = int(part.split('nlayers=')[1].split('_')[0])
+                elif 'hdim=' in part:
+                    inferred_hidden_dim = int(part.split('hdim=')[1].split('_')[0])
+            
+            # Use inferred values if found, otherwise use command line args
+            if inferred_n_layers is not None:
+                print(f"Inferred n_layers from path: {inferred_n_layers}")
+                args.n_layers = inferred_n_layers
+            if inferred_hidden_dim is not None:
+                print(f"Inferred hidden_dim from path: {inferred_hidden_dim}")
+                args.hidden_dim = inferred_hidden_dim
+            
+            # Load the pretrained MLP checkpoint
+            checkpoint = torch.load(args.pretrained_mlp_path, map_location=device)
+            
+            # Create a temporary MLP with the inferred architecture to load the weights
+            temp_mlp = MLP(
+                n_dim=2,
+                n_layers=args.n_layers,
+                hidden_dim=args.hidden_dim,
+                activation=activation,
+                device=device,
+            )
+            temp_mlp.load_state_dict(checkpoint)
+            temp_mlp.eval()
+            
+            # Recreate the temporal MLP interpolant with the matched architecture
+            print(f"Recreating temporal MLP interpolant with matched architecture: n_layers={args.n_layers}, hidden_dim={args.hidden_dim}")
+            model = MLPTemporalSpectralInterpolation(
+                Ns=[n_t, n_x],
+                bases=bases,
+                domains=pde.domain,
+                device=device,
+                hidden_layers=(args.hidden_dim,) * (args.n_layers - 1),  # n_layers-1 hidden layers
+                activation=activation,
+            )
+            
+            # Initialize temporal MLP interpolant with MLP weights
+            model.load_values_from_model(temp_mlp)
+            
+            print(f"Successfully initialized temporal MLP interpolant from MLP checkpoint")
+            print(f"Model values shape: {model.values.shape}")
+            print(f"Model values range: [{model.values.min().item():.6f}, {model.values.max().item():.6f}]")
+            
+            # Debug: Check what the MLP outputs at a few test points
+            test_points = torch.tensor([[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]], device=device)
+            test_outputs = temp_mlp(test_points)
+            print(f"Pretrained MLP test outputs: {test_outputs.squeeze()}")
+            
+            # Debug: Check what the temporal model outputs at the same points
+            test_outputs_temporal = model.mlp(test_points)
+            print(f"Temporal model MLP test outputs: {test_outputs_temporal.squeeze()}")
+            
+            # Debug: Check nodal values
+            nodal_vals = model._compute_node_values()
+            print(f"Nodal values shape: {nodal_vals.shape}")
+            print(f"Nodal values range: [{nodal_vals.min().item():.6f}, {nodal_vals.max().item():.6f}]")
+            
+            # Evaluate initial performance
+            print("\nEvaluating initial performance...")
+            eval_nodes = eval_sampler()
+            ref_solution = pde.get_solution(eval_nodes)
+            initial_predictions = model.interpolate(eval_nodes)
+            
+            initial_l2 = l2_error(initial_predictions, ref_solution)
+            initial_max = max_error(initial_predictions, ref_solution)
+            initial_l2_rel = l2_relative_error(initial_predictions, ref_solution)
+            
+            print(f"Initial L2 Error: {initial_l2:.6e}")
+            print(f"Initial Max Error: {initial_max:.6e}")
+            print(f"Initial L2 Relative Error: {initial_l2_rel:.6e}")
+            
+            # Save initial performance
+            initial_results = {
+                "initial_l2_error": initial_l2.item() if hasattr(initial_l2, 'item') else initial_l2,
+                "initial_max_error": initial_max.item() if hasattr(initial_max, 'item') else initial_max,
+                "initial_l2_relative_error": initial_l2_rel.item() if hasattr(initial_l2_rel, 'item') else initial_l2_rel,
+                "inferred_n_layers": args.n_layers,
+                "inferred_hidden_dim": args.hidden_dim,
+            }
+            torch.save(initial_results, os.path.join(save_dir, "initial_results.pt"))
+
         # Training setup
         n_epochs = args.n_epochs
         if args.method == "nys_newton":
@@ -1006,11 +1111,11 @@ if __name__ == "__main__":
         elif args.method == "ssbroyden" and ssbroyden_available:
             optimizer = SSBroyden2(
                 model.parameters(),
-                lr=1.0,
-                init_scale=True,
-                c1=1e-4,
-                c2=0.9,
-                max_ls=20,
+                lr=1.0,  # Reverted to original
+                init_scale=True,  # Back to original
+                c1=1e-4,  # Back to original
+                c2=0.9,   # Back to original
+                max_ls=20,  # Back to original
             )
         elif args.method == "lssbroyden" and ssbroyden_available:
             optimizer = L_SSBroyden(
@@ -1101,7 +1206,30 @@ if __name__ == "__main__":
                 logger=logger,
                 lr_schedule=args.lr_schedule,
                 gradient_clip=args.gradient_clip,
+                disable_adam_warmstart=args.disable_adam_warmstart,
             )
+        
+        # Final evaluation if using warm start
+        if args.pretrained_mlp_path is not None:
+            print("\nFinal evaluation...")
+            final_predictions = model.interpolate(eval_nodes)
+            final_l2 = l2_error(final_predictions, ref_solution)
+            final_max = max_error(final_predictions, ref_solution)
+            final_l2_rel = l2_relative_error(final_predictions, ref_solution)
+            
+            print(f"Final L2 Error: {final_l2:.6e}")
+            print(f"Final Max Error: {final_max:.6e}")
+            print(f"Final L2 Relative Error: {final_l2_rel:.6e}")
+            
+            # Save final results
+            final_results = {
+                "final_l2_error": final_l2.item() if hasattr(final_l2, 'item') else final_l2,
+                "final_max_error": final_max.item() if hasattr(final_max, 'item') else final_max,
+                "final_l2_relative_error": final_l2_rel.item() if hasattr(final_l2_rel, 'item') else final_l2_rel,
+                "improvement_l2": (initial_l2 - final_l2).item() if hasattr((initial_l2 - final_l2), 'item') else (initial_l2 - final_l2),
+                "improvement_max": (initial_max - final_max).item() if hasattr((initial_max - final_max), 'item') else (initial_max - final_max),
+            }
+            torch.save(final_results, os.path.join(save_dir, "final_results.pt"))
 
     elif args.model == "piratenet":
         save_dir = os.path.join(

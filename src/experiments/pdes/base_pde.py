@@ -929,6 +929,7 @@ class BasePDE(BaseFcn):
         hessian_num_iter: int = 100,
         hessian_num_run: int = 1,
         n_square_boundary: int = 0,
+        **kwargs,
     ):
         """
         Train **only** with the dense Self-Scaled Broyden-II optimiser that lives
@@ -1920,6 +1921,7 @@ class BasePDE(BaseFcn):
         alternating_training: bool = False,  # New parameter for alternating training
         n_adam_epochs: int = 90,  # Number of Adam epochs per cycle
         n_lbfgs_epochs: int = 10,   # Number of L-BFGS epochs per cycle
+        disable_adam_warmstart: bool = False,  # New parameter to disable Adam warmstart for SSBroyden
         **kwargs,
     ):
         # Route to alternating training if requested
@@ -1987,7 +1989,7 @@ class BasePDE(BaseFcn):
                 ),  # Pass through n_square_boundary
                 **kwargs,
             )
-        elif isinstance(optimizer, SSBroyden2):
+        elif isinstance(optimizer, SSBroyden2) and not disable_adam_warmstart:
             # Use Adam warm start followed by SSBroyden
             print("Using Adam warm start followed by SSBroyden optimization...")
             
@@ -2006,6 +2008,30 @@ class BasePDE(BaseFcn):
                 hessian_every=hessian_every,
                 hessian_num_iter=hessian_num_iter,
                 hessian_num_run=hessian_num_run,
+                **kwargs,
+            )
+        elif isinstance(optimizer, SSBroyden2) and disable_adam_warmstart:
+            # Use direct SSBroyden without Adam warmstart
+            print("Using direct SSBroyden optimization (no Adam warmstart)...")
+            
+            self.train_model_ssbroyden(
+                model,
+                n_epochs,
+                optimizer,
+                pde_sampler,
+                ic_sampler,
+                ic_weight,
+                eval_sampler,
+                eval_metrics,
+                eval_every=eval_every,
+                save_dir=save_dir,
+                logger=logger,
+                hessian_every=hessian_every,
+                hessian_num_iter=hessian_num_iter,
+                hessian_num_run=hessian_num_run,
+                n_square_boundary=kwargs.get(
+                    "n_square_boundary", 0
+                ),  # Pass through n_square_boundary
                 **kwargs,
             )
         elif isinstance(optimizer, L_SSBroyden):
