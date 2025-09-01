@@ -30,6 +30,7 @@ class MLPSpectralInterpolationND(SpectralInterpolationND):
         domains: List[Tuple[float, float]],
         *,
         device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
         fd_k: Optional[List[int]] = None,
         # ---- MLP‑specific kwargs ----
         hidden_layers: Sequence[int] = (128, 128),
@@ -41,7 +42,7 @@ class MLPSpectralInterpolationND(SpectralInterpolationND):
 
         Parameters
         ----------
-        Ns, bases, domains, device, fd_k
+        Ns, bases, domains, device, dtype, fd_k
             Forwarded verbatim to :class:`SpectralInterpolationND`.
         hidden_layers, activation
             Describe the architecture of the internal MLP *f_θ*.
@@ -55,6 +56,7 @@ class MLPSpectralInterpolationND(SpectralInterpolationND):
             bases=bases,
             domains=domains,
             device=device,
+            dtype=dtype,
             fd_k=fd_k,
         )
 
@@ -89,6 +91,7 @@ class MLPSpectralInterpolationND(SpectralInterpolationND):
             hidden_dim=hidden_layers[0],  # Use first hidden layer size
             activation=activation,
             device=device,
+            dtype=dtype,
         )
 
     ###########################################################################

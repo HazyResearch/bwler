@@ -196,7 +196,11 @@ class SSBroyden2(Optimizer):
                 grad_norm = g_k.norm()
                 if grad_norm > 0:
                     tau0 = grad_norm.item()
-            self.state["H"] = torch.eye(n, device=self._device) / tau0
+            # Get dtype from parameters to ensure consistency
+            param_dtype = self._params[0].dtype
+            self.state["H"] = (
+                torch.eye(n, device=self._device, dtype=param_dtype) / tau0
+            )
 
         H_k: Tensor = self.state["H"]
 
@@ -240,7 +244,7 @@ class SSBroyden2(Optimizer):
             # Skip rank‑two update if curvature condition degenerates
             self.state["H"] = H_k
             return f_new  # type: ignore[return‑value]
-        
+
         rhok = 1.0 / rhok_inv if rhok_inv.abs() > 1e-32 else 0.001
 
         Hkyk = H_k @ y_k
@@ -254,49 +258,55 @@ class SSBroyden2(Optimizer):
         # Check if sqrt argument would be negative
         # sqrt_arg = torch.abs(a_k) / (1 + a_k) # TODO JL 6/30/25. Leading to negative sqrt_arg.
         sqrt_arg = torch.abs(torch.abs(a_k) / (1 + a_k))
-        
+
         # Store last good sqrt_arg for fallback
-        if not hasattr(self, '_last_good_sqrt_arg'):
-            self._last_good_sqrt_arg = torch.tensor(0.5, device=self._device)  # reasonable default
-        
+        if not hasattr(self, "_last_good_sqrt_arg"):
+            self._last_good_sqrt_arg = torch.tensor(
+                0.5, device=self._device
+            )  # reasonable default
+
         if sqrt_arg < 0:
-            print(f"WARNING: sqrt argument would be negative (sqrt_arg={sqrt_arg.item():.6f}), using last good value: {self._last_good_sqrt_arg.item():.6f}")
+            print(
+                f"WARNING: sqrt argument would be negative (sqrt_arg={sqrt_arg.item():.6f}), using last good value: {self._last_good_sqrt_arg.item():.6f}"
+            )
             # Use the last good sqrt_arg value instead of a small fallback
             sqrt_arg = self._last_good_sqrt_arg
         elif sqrt_arg > 10:
-            print(f"WARNING: sqrt argument too large (sqrt_arg={sqrt_arg.item():.6f}), using last good value: {self._last_good_sqrt_arg.item():.6f}")
+            print(
+                f"WARNING: sqrt argument too large (sqrt_arg={sqrt_arg.item():.6f}), using last good value: {self._last_good_sqrt_arg.item():.6f}"
+            )
             # Use the last good sqrt_arg value instead of capping
             sqrt_arg = self._last_good_sqrt_arg
         else:
             # Store this good value for future use
             self._last_good_sqrt_arg = sqrt_arg.clone()
-        
+
         rho_k_minus = torch.minimum(
             torch.tensor(1.0, device=self._device),
             h_k * (1 - torch.sqrt(sqrt_arg)),
         )
-        
+
         # Check for NaN in rho_k_minus
         if torch.isnan(rho_k_minus):
             print(f"ERROR: rho_k_minus is NaN, ending optimization run")
             raise RuntimeError("rho_k_minus is NaN - optimization cannot continue")
-        
+
         # Add stability checks for divisions
         if torch.abs(a_k) < 1e-8:
             print(f"WARNING: a_k too small, skipping update")
             self.state["H"] = H_k
             return f_new
-            
+
         if torch.abs(b_k) < 1e-8:
             print(f"WARNING: b_k too small, skipping update")
             self.state["H"] = H_k
             return f_new
-            
+
         if torch.abs(rho_k_minus) < 1e-8:
             print(f"WARNING: rho_k_minus too small, skipping update")
             self.state["H"] = H_k
             return f_new
-        
+
         theta_k_minus = (rho_k_minus - 1) / a_k
         theta_k_plus = 1 / rho_k_minus
         theta_k = torch.max(theta_k_minus, torch.min(theta_k_plus, (1 - b_k) / b_k))
@@ -304,7 +314,7 @@ class SSBroyden2(Optimizer):
         rho_k_cap = torch.minimum(torch.tensor(1.0, device=self._device), 1 / b_k)
         sigma_k = 1 + theta_k * a_k
         sigma_pow = torch.abs(sigma_k) ** (1.0 / (1 - n))
-        
+
         if theta_k <= 0:
             tau_k = torch.minimum(rho_k_cap * sigma_pow, sigma_k)
         else:

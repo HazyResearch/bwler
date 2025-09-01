@@ -4,6 +4,7 @@ import torch
 from typing import List, Tuple
 
 from src.optimizers.nys_newton_cg import NysNewtonCG
+from src.optimizers.ssbroyden import SSBroyden2
 
 from src.utils.metrics import l2_relative_error
 
@@ -174,7 +175,14 @@ class BaseFcn:
             ax2.set_ylabel("x")
 
             # Plot 3: error (log scale)
-            error_min = max(1e-16, torch.min(errors[errors > 0]).item() if torch.any(errors > 0) else 1e-16)
+            error_min = max(
+                1e-16,
+                (
+                    torch.min(errors[errors > 0]).item()
+                    if torch.any(errors > 0)
+                    else 1e-16
+                ),
+            )
             im3 = ax3.imshow(
                 errors.T,
                 extent=[
@@ -213,7 +221,11 @@ class BaseFcn:
             },
             "lbfgs": {
                 "constructor": torch.optim.LBFGS,
-                "kwargs": {"history_size": 100, "tolerance_grad": 1e-16, "tolerance_change": 1e-16},
+                "kwargs": {
+                    "history_size": 100,
+                    "tolerance_grad": 1e-16,
+                    "tolerance_change": 1e-16,
+                },
             },
             "nys_newton": {
                 "constructor": NysNewtonCG,
@@ -226,6 +238,16 @@ class BaseFcn:
                     "line_search_fn": "armijo",
                     "cg_tol": 1e-16,
                     "cg_max_iters": 1000,
+                },
+            },
+            "ssbroyden": {
+                "constructor": SSBroyden2,
+                "kwargs": {
+                    "lr": 1.0,
+                    "init_scale": True,
+                    "c1": 1e-4,
+                    "c2": 0.9,
+                    "max_ls": 20,
                 },
             },
         }

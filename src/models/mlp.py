@@ -11,6 +11,7 @@ class MLP(nn.Module):
         hidden_dim: int = 32,
         activation: torch.nn.Module = torch.tanh,
         device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
     ):
         """
         2-layer MLP that maps (B, n_dim) -> (B, 1)
@@ -21,17 +22,18 @@ class MLP(nn.Module):
         """
         super().__init__()
         self.device = torch.device(device)
+        self.dtype = dtype
         self.n_dim = n_dim
         self.activation = activation
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
         self.fc = nn.ModuleList(
-            [nn.Linear(self.n_dim, self.hidden_dim, device=device)]
+            [nn.Linear(self.n_dim, self.hidden_dim, device=device, dtype=dtype)]
             + [
-                nn.Linear(self.hidden_dim, self.hidden_dim, device=device)
+                nn.Linear(self.hidden_dim, self.hidden_dim, device=device, dtype=dtype)
                 for _ in range(self.n_layers - 2)
             ]
-            + [nn.Linear(self.hidden_dim, 1, device=device)]
+            + [nn.Linear(self.hidden_dim, 1, device=device, dtype=dtype)]
         )
         self.device = device
 

@@ -1,6 +1,7 @@
 """
 Model creation and training utilities for 1D interpolation experiments.
 """
+
 import torch
 import os
 from typing import Tuple
@@ -21,6 +22,7 @@ def create_mlp(config: ModelConfig) -> MLP:
         hidden_dim=config.hidden_dim,
         activation=config.activation,
         device=config.device,
+        dtype=config.dtype,
     )
 
 
@@ -31,6 +33,7 @@ def create_chebyshev_interpolant(config: ChebyshevConfig) -> SpectralInterpolati
         bases=["chebyshev"],
         domains=config.domain,
         device=config.device,
+        dtype=config.dtype,
     )
 
 
@@ -43,6 +46,7 @@ def create_mlp_interpolant(config: MLPInterpolantConfig) -> MLPSpectralInterpola
         device=config.device,
         hidden_layers=config.hidden_layers,
         activation=config.activation,
+        dtype=config.dtype,
     )
 
 
@@ -60,7 +64,7 @@ def train_and_evaluate_model(
 ) -> Tuple[float, float, float, float, torch.Tensor, torch.Tensor]:
     """
     Train and evaluate a model, returning metrics and predictions.
-    
+
     Returns:
         Tuple of (rmse_train, l_inf_train, rmse_test, l_inf_test, u_pred_train, u_pred_test)
     """
@@ -75,11 +79,11 @@ def train_and_evaluate_model(
         save_dir=exp_dir,
         logger=logger,
     )
-    
+
     with torch.no_grad():
         u_pred_train = model([target.train_points])
         u_pred_test = model([target.test_points])
-        
+
         rmse_train = torch.sqrt(
             torch.mean((u_pred_train - target.train_values) ** 2)
         ).item()
@@ -88,7 +92,7 @@ def train_and_evaluate_model(
             torch.mean((u_pred_test - target.test_values) ** 2)
         ).item()
         l_inf_test = torch.max(torch.abs(u_pred_test - target.test_values)).item()
-        
+
     return rmse_train, l_inf_train, rmse_test, l_inf_test, u_pred_train, u_pred_test
 
 
@@ -98,46 +102,66 @@ def run_mlp_experiment(
     n_epochs: int,
     eval_every: int,
     exp_dir: str,
+    optimizer_name: str = "adam",
 ) -> dict:
     """Run MLP experiment for a single architecture."""
-    print(f"Running MLP experiment (hidden_dim={config.hidden_dim}, n_layers={config.n_layers})")
-    
+    print(
+        f"Running MLP experiment (hidden_dim={config.hidden_dim}, n_layers={config.n_layers})"
+    )
+
     # Create model and optimizer
     model = create_mlp(config)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    
+
+    # Use the target's get_optimizer method to create the optimizer
+    optimizer = target.get_optimizer(
+        model,
+        optimizer_name.lower(),
+        lr=config.learning_rate,
+    )
+
     # Create logger
     logger = Logger(
-        path=os.path.join(exp_dir, f"mlp_hdim{config.hidden_dim}_layers{config.n_layers}.json")
+        path=os.path.join(
+            exp_dir, f"mlp_hdim{config.hidden_dim}_layers{config.n_layers}.json"
+        )
     )
-    
+
     # Create subdirectory for this specific model configuration
-    model_subdir = os.path.join(exp_dir, f"mlp_hdim{config.hidden_dim}_layers{config.n_layers}")
+    model_subdir = os.path.join(
+        exp_dir, f"mlp_hdim{config.hidden_dim}_layers{config.n_layers}"
+    )
     os.makedirs(model_subdir, exist_ok=True)
-    
+
     # Train and evaluate
     results = train_and_evaluate_model(
-        target, model, optimizer, n_epochs, eval_every,
+        target,
+        model,
+        optimizer,
+        n_epochs,
+        eval_every,
         model_subdir,
-        logger, l2_error, max_error, l2_relative_error
+        logger,
+        l2_error,
+        max_error,
+        l2_relative_error,
     )
-    
+
     rmse_train, l_inf_train, rmse_test, l_inf_test, u_pred_train, u_pred_test = results
-    
+
     print(
         f"MLP (hdim={config.hidden_dim}, layers={config.n_layers}) "
         f"Train RMSE: {rmse_train:.2e}, L_inf: {l_inf_train:.2e} | "
         f"Test RMSE: {rmse_test:.2e}, L_inf: {l_inf_test:.2e}"
     )
-    
+
     return {
-        'rmse_train': rmse_train,
-        'l_inf_train': l_inf_train,
-        'rmse_test': rmse_test,
-        'l_inf_test': l_inf_test,
-        'u_pred_train': u_pred_train,
-        'u_pred_test': u_pred_test,
-        'model': model
+        "rmse_train": rmse_train,
+        "l_inf_train": l_inf_train,
+        "rmse_test": rmse_test,
+        "l_inf_test": l_inf_test,
+        "u_pred_train": u_pred_train,
+        "u_pred_test": u_pred_test,
+        "model": model,
     }
 
 
@@ -150,39 +174,46 @@ def run_chebyshev_experiment(
 ) -> dict:
     """Run Chebyshev interpolant experiment."""
     print(f"Running Chebyshev interpolant experiment (n_nodes={config.n_nodes})")
-    
+
     # Create model and optimizer
     model = create_chebyshev_interpolant(config)
     optimizer = target.get_optimizer(model, "adam")
-    
+
     # Create logger
     logger = Logger(
         path=os.path.join(exp_dir, f"chebyshev_interp_{config.n_nodes}.json")
     )
-    
+
     # Train and evaluate
     results = train_and_evaluate_model(
-        target, model, optimizer, n_epochs, eval_every,
+        target,
+        model,
+        optimizer,
+        n_epochs,
+        eval_every,
         os.path.join(exp_dir, f"chebyshev_interp_{config.n_nodes}"),
-        logger, l2_error, max_error, l2_relative_error
+        logger,
+        l2_error,
+        max_error,
+        l2_relative_error,
     )
-    
+
     rmse_train, l_inf_train, rmse_test, l_inf_test, u_pred_train, u_pred_test = results
-    
+
     print(
         f"Chebyshev Interpolant (n={config.n_nodes}) "
         f"Train RMSE: {rmse_train:.2e}, L_inf: {l_inf_train:.2e} | "
         f"Test RMSE: {rmse_test:.2e}, L_inf: {l_inf_test:.2e}"
     )
-    
+
     return {
-        'rmse_train': rmse_train,
-        'l_inf_train': l_inf_train,
-        'rmse_test': rmse_test,
-        'l_inf_test': l_inf_test,
-        'u_pred_train': u_pred_train,
-        'u_pred_test': u_pred_test,
-        'model': model,
+        "rmse_train": rmse_train,
+        "l_inf_train": l_inf_train,
+        "rmse_test": rmse_test,
+        "l_inf_test": l_inf_test,
+        "u_pred_train": u_pred_train,
+        "u_pred_test": u_pred_test,
+        "model": model,
     }
 
 
@@ -195,38 +226,44 @@ def run_mlp_interpolant_experiment(
 ) -> dict:
     """Run MLP interpolant experiment."""
     print(f"Running MLP Interpolant experiment (n_nodes={config.n_nodes})")
-    
+
     # Create model and optimizer
     model = create_mlp_interpolant(config)
     optimizer = torch.optim.Adam(model.mlp.parameters(), lr=config.learning_rate)
-    
+
     # Create logger
     logger = Logger(
         path=os.path.join(exp_dir, f"mlpinterp_interp_{config.n_nodes}.json")
     )
-    
+
     # Train and evaluate
     results = train_and_evaluate_model(
-        target, model, optimizer, n_epochs, eval_every,
+        target,
+        model,
+        optimizer,
+        n_epochs,
+        eval_every,
         os.path.join(exp_dir, f"mlpinterp_interp_{config.n_nodes}"),
-        logger, l2_error, max_error, l2_relative_error
+        logger,
+        l2_error,
+        max_error,
+        l2_relative_error,
     )
-    
+
     rmse_train, l_inf_train, rmse_test, l_inf_test, u_pred_train, u_pred_test = results
-    
+
     print(
         f"MLP Interpolant (n={config.n_nodes}) "
         f"Train RMSE: {rmse_train:.2e}, L_inf: {l_inf_train:.2e} | "
         f"Test RMSE: {rmse_test:.2e}, L_inf: {l_inf_test:.2e}"
     )
-    
-    return {
-        'rmse_train': rmse_train,
-        'l_inf_train': l_inf_train,
-        'rmse_test': rmse_test,
-        'l_inf_test': l_inf_test,
-        'u_pred_train': u_pred_train,
-        'u_pred_test': u_pred_test,
-        'model': model
-    }
 
+    return {
+        "rmse_train": rmse_train,
+        "l_inf_train": l_inf_train,
+        "rmse_test": rmse_test,
+        "l_inf_test": l_inf_test,
+        "u_pred_train": u_pred_train,
+        "u_pred_test": u_pred_test,
+        "model": model,
+    }

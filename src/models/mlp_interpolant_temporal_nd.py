@@ -31,6 +31,7 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
         domains: List[Tuple[float, float]],
         *,
         device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
         fd_k: Optional[List[int]] = None,
         # ---- BWLer Hat specific kwargs ----
         time_dim: int = 0,
@@ -41,7 +42,7 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
 
         Parameters
         ----------
-        Ns, bases, domains, device, fd_k
+        Ns, bases, domains, device, dtype, fd_k
             Forwarded verbatim to :class:`SpectralInterpolationND`.
         time_dim
             Which dimension is treated as time (default: 0).
@@ -54,6 +55,7 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
             bases=bases,
             domains=domains,
             device=device,
+            dtype=dtype,
             fd_k=fd_k,
         )
 
@@ -87,6 +89,7 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
             hidden_dim=hidden_layers[0],  # Use first hidden layer size
             activation=activation,
             device=device,
+            dtype=dtype,
         )
 
     ###########################################################################
@@ -117,11 +120,16 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
 
     def _is_pure_time_derivative(self, k: Tuple[int, ...]) -> bool:
         """Check if the derivative is only in the time dimension."""
-        return all(k[i] == 0 for i in range(len(k)) if i != self.time_dim) and k[self.time_dim] > 0
+        return (
+            all(k[i] == 0 for i in range(len(k)) if i != self.time_dim)
+            and k[self.time_dim] > 0
+        )
 
     def _is_pure_space_derivative(self, k: Tuple[int, ...]) -> bool:
         """Check if the derivative is only in space dimensions."""
-        return k[self.time_dim] == 0 and any(k[i] > 0 for i in range(len(k)) if i != self.time_dim)
+        return k[self.time_dim] == 0 and any(
+            k[i] > 0 for i in range(len(k)) if i != self.time_dim
+        )
 
     def _get_space_derivative_orders(self, k: Tuple[int, ...]) -> Tuple[int, ...]:
         """Get derivative orders for space dimensions only."""
@@ -129,7 +137,9 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
         space_k[self.time_dim] = 0  # Zero out time dimension
         return tuple(space_k)
 
-    def _time_derivative_via_mlp(self, x_eval: Union[List[torch.Tensor], torch.Tensor], order: int) -> torch.Tensor:
+    def _time_derivative_via_mlp(
+        self, x_eval: Union[List[torch.Tensor], torch.Tensor], order: int
+    ) -> torch.Tensor:
         """Compute time derivative using MLP autograd."""
         if isinstance(x_eval, (list, tuple)):
             # Form meshgrid and flatten for autograd
@@ -137,10 +147,7 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
             x_stack = torch.stack(x_mesh, dim=-1)  # (..., n_dim)
             orig_shape = x_stack.shape[:-1]
             x_flat = (
-                x_stack.reshape(-1, self.n_dim)
-                .clone()
-                .detach()
-                .requires_grad_(True)
+                x_stack.reshape(-1, self.n_dim).clone().detach().requires_grad_(True)
             )
             y = self.mlp(x_flat)
             # Apply time derivative
@@ -207,24 +214,24 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
             return self._with_node_values(
                 super().derivative, x_eval, k, use_spectral=use_spectral
             )
-        
+
         # Check if this is pure time derivative
         if self._is_pure_time_derivative(k):
             # Pure time derivative - use MLP autograd
             time_order = k[self.time_dim]
             return self._time_derivative_via_mlp(x_eval, time_order)
-        
+
         # Mixed derivative - apply time derivative first, then space derivatives
         time_order = k[self.time_dim]
         space_k = self._get_space_derivative_orders(k)
-        
+
         # First, get time derivative via MLP
         time_deriv = self._time_derivative_via_mlp(x_eval, time_order)
-        
+
         # If no space derivatives, we're done
         if all(space_k[i] == 0 for i in range(len(space_k))):
             return time_deriv
-        
+
         # For mixed derivatives, we'll use a simplified approach:
         # Evaluate the time derivative at the evaluation points and then
         # apply space derivatives using finite differences
@@ -232,23 +239,31 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
             # For now, we'll use a simple finite difference approach for mixed derivatives
             # This is not ideal but should work for testing
             h = 1e-6  # Small step size
-            
+
             # Get time derivative at shifted points for finite differences
             if space_k[1] > 0:  # Space derivative in x direction
                 x_shifted_plus = [x_eval[0], x_eval[1] + h]
                 x_shifted_minus = [x_eval[0], x_eval[1] - h]
-                
-                time_deriv_plus = self._time_derivative_via_mlp(x_shifted_plus, time_order)
-                time_deriv_minus = self._time_derivative_via_mlp(x_shifted_minus, time_order)
-                
+
+                time_deriv_plus = self._time_derivative_via_mlp(
+                    x_shifted_plus, time_order
+                )
+                time_deriv_minus = self._time_derivative_via_mlp(
+                    x_shifted_minus, time_order
+                )
+
                 # Finite difference for first derivative
                 if space_k[1] == 1:
                     return (time_deriv_plus - time_deriv_minus) / (2 * h)
                 elif space_k[1] == 2:
                     # Second derivative
-                    time_deriv_center = self._time_derivative_via_mlp(x_eval, time_order)
-                    return (time_deriv_plus - 2 * time_deriv_center + time_deriv_minus) / (h ** 2)
-            
+                    time_deriv_center = self._time_derivative_via_mlp(
+                        x_eval, time_order
+                    )
+                    return (
+                        time_deriv_plus - 2 * time_deriv_center + time_deriv_minus
+                    ) / (h**2)
+
             # If we get here, we don't have a simple case - fall back to MLP autograd
             # This is not ideal but ensures the test passes
             return self._time_derivative_via_mlp(x_eval, time_order)
@@ -276,10 +291,10 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
             # Time dimension - use MLP autograd
             if isinstance(x_eval, (list, tuple)):
                 x_eval = torch.stack(x_eval, dim=1)
-            
+
             x_eval.requires_grad_(True)
             y = self.mlp(x_eval)
-            
+
             # Compute derivative in time dimension
             grad = torch.autograd.grad(y.sum(), x_eval, create_graph=True)[0]
             return grad[:, dim]
@@ -301,10 +316,12 @@ class MLPTemporalSpectralInterpolation(SpectralInterpolationND):
     def load_values_from_model(self, model: nn.Module):
         """Load MLP weights from another model (e.g., for initialization from pretrained MLP)."""
         # Check if the model is an MLP (which is what we expect for warm start)
-        if hasattr(model, 'state_dict'):
+        if hasattr(model, "state_dict"):
             # Copy the MLP weights directly
             with torch.no_grad():
                 self.mlp.load_state_dict(model.state_dict())
             print(f"Successfully loaded MLP weights from pretrained model")
         else:
-            raise ValueError("Expected model to have state_dict method for weight loading") 
+            raise ValueError(
+                "Expected model to have state_dict method for weight loading"
+            )

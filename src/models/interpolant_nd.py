@@ -14,6 +14,7 @@ class SpectralInterpolationND(nn.Module):
         bases: List[str],
         domains: List[Tuple[float, float]],
         device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
         fd_k: Optional[List[int]] = None,
     ):
         """
@@ -24,10 +25,12 @@ class SpectralInterpolationND(nn.Module):
             bases: List of bases per direction, either 'fourier' or 'chebyshev'
             domains: List of tuples of (min, max) per direction
             device: Device to use for computation
+            dtype: Data type to use for computation
             fd_k: List of half-bandwidths for FD stencils (None means use spectral)
         """
         super().__init__()
         self.device = torch.device(device)
+        self.dtype = dtype
 
         # Store domain information
         assert len(Ns) == len(bases) == len(domains)
@@ -55,11 +58,13 @@ class SpectralInterpolationND(nn.Module):
 
         for dim in range(self.n_dim):
             if self.bases[dim] == "chebyshev":
-                i = torch.linspace(0, 1, self.Ns[dim], device=self.device)
+                i = torch.linspace(
+                    0, 1, self.Ns[dim], device=self.device, dtype=self.dtype
+                )
                 self.nodes_standard[dim] = torch.cos(torch.pi * i)
                 # Compute barycentric weights for Chebyshev
                 N = self.Ns[dim]
-                weights = torch.ones(N, device=self.device)
+                weights = torch.ones(N, device=self.device, dtype=self.dtype)
                 weights[0] *= 0.5
                 weights[-1] *= 0.5
                 weights[1::2] = -1
@@ -67,11 +72,15 @@ class SpectralInterpolationND(nn.Module):
                 self.k[dim] = None
             elif self.bases[dim] == "fourier":
                 self.nodes_standard[dim] = torch.linspace(
-                    0, 2 * torch.pi, self.Ns[dim] + 1, device=self.device
+                    0,
+                    2 * torch.pi,
+                    self.Ns[dim] + 1,
+                    device=self.device,
+                    dtype=self.dtype,
                 )[:-1]
                 # Compute FFT frequencies
                 self.k[dim] = torch.fft.fftfreq(self.Ns[dim]) * self.Ns[dim]
-                self.k[dim] = self.k[dim].to(self.device)
+                self.k[dim] = self.k[dim].to(self.device, dtype=self.dtype)
             else:
                 raise ValueError(f"Unknown basis: {self.bases[dim]}")
 
@@ -112,7 +121,9 @@ class SpectralInterpolationND(nn.Module):
         self.mesh = torch.meshgrid(*mesh_args, indexing="ij")
 
         # Learnable values at node points
-        self.values = nn.Parameter(torch.zeros(self.Ns, device=self.device))
+        self.values = nn.Parameter(
+            torch.zeros(self.Ns, device=self.device, dtype=self.dtype)
+        )
 
     def load_values_from_model(self, model: nn.Module):
         with torch.no_grad():
