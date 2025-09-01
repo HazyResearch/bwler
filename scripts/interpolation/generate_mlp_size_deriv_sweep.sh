@@ -34,11 +34,11 @@ generate_sbatch_script() {
     
     # Set optimizer-specific training parameters
     if [ "$OPTIMIZER" = "SSBroyden" ]; then
-        local N_EPOCHS_OPT=1000      # SSBroyden: 1000 epochs for faster training
-        local EVAL_EVERY_OPT=100     # SSBroyden: log every 100 epochs
-        local JOB_TIME="2:00:00"     # SSBroyden: shorter job time
+        local N_EPOCHS_OPT=10000     # SSBroyden: 10000 epochs for full training
+        local EVAL_EVERY_OPT=1000    # SSBroyden: log every 1000 epochs
+        local JOB_TIME="4:00:00"     # SSBroyden: longer job time
     else
-        local N_EPOCHS_OPT=10000     # Adam: 10000 epochs for full training
+        local N_EPOCHS_OPT=20000     # Adam: 20000 epochs for full training
         local EVAL_EVERY_OPT=1000    # Adam: log every 1000 epochs
         local JOB_TIME="4:00:00"     # Adam: longer job time
     fi
@@ -120,8 +120,8 @@ echo ""
 echo "Generated $((${#LAYERS_LIST[@]} * ${#HDIM_LIST[@]} * 2)) total sbatch scripts:"
 echo ""
 echo "=== CONFIGURATION SUMMARY ==="
-echo "Adam jobs:    10,000 epochs, log every 1,000 epochs, 4:00:00 time limit"
-echo "SSBroyden jobs: 1,000 epochs, log every 100 epochs, 2:00:00 time limit"
+echo "Adam jobs:    20,000 epochs, log every 1,000 epochs, 4:00:00 time limit"
+echo "SSBroyden jobs: 10,000 epochs, log every 1,000 epochs, 4:00:00 time limit"
 echo ""
 echo "Adam scripts:"
 for LAYERS in "${LAYERS_LIST[@]}"; do
