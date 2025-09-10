@@ -4,7 +4,7 @@ Model creation and training utilities for 1D interpolation experiments.
 
 import torch
 import os
-from typing import Tuple
+from typing import Tuple, List, Callable
 
 from src.models.mlp import MLP
 from src.models.interpolant_nd import SpectralInterpolationND
@@ -61,6 +61,7 @@ def train_and_evaluate_model(
     l2_error,
     max_error,
     l2_relative_error,
+    weight_evals: List[Callable] = [],
 ) -> Tuple[float, float, float, float, torch.Tensor, torch.Tensor]:
     """
     Train and evaluate a model, returning metrics and predictions.
@@ -78,6 +79,7 @@ def train_and_evaluate_model(
         eval_every=eval_every,
         save_dir=exp_dir,
         logger=logger,
+        weight_evals=weight_evals,
     )
 
     with torch.no_grad():
@@ -103,6 +105,7 @@ def run_mlp_experiment(
     eval_every: int,
     exp_dir: str,
     optimizer_name: str = "adam",
+    weight_evals: List[Callable] = [],
 ) -> dict:
     """Run MLP experiment for a single architecture."""
     print(
@@ -144,6 +147,7 @@ def run_mlp_experiment(
         l2_error,
         max_error,
         l2_relative_error,
+        weight_evals,
     )
 
     rmse_train, l_inf_train, rmse_test, l_inf_test, u_pred_train, u_pred_test = results

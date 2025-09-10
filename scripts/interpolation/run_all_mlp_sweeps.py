@@ -70,7 +70,7 @@ def get_sweep_configs():
     hdim_list = [32, 64, 128]
 
     # Derivative points to sweep (exponential spacing)
-    deriv_points_list = [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+    deriv_points_list = [0]
 
     return layers_list, hdim_list, deriv_points_list
 

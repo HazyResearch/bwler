@@ -10,6 +10,7 @@ import torch
 import matplotlib.pyplot as plt
 import json
 import sys
+import re
 
 # Add project root to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -70,6 +71,18 @@ def parse_args():
         choices=["adam", "ssbroyden"],
         help="Optimizer to use",
     )
+    parser.add_argument(
+        "--k",
+        type=float,
+        default=2.0,
+        help="Frequency multiplier for sine target (i.e., sin(kx))",
+    )
+    parser.add_argument(
+        "--svd_plot_every",
+        type=int,
+        default=2,
+        help="Plot every k-th evaluation in SVD evolution plots to reduce clutter",
+    )
     return parser.parse_args()
 
 
@@ -118,6 +131,128 @@ def plot_weight_norms(norms_dict, save_path):
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close()
+
+def compute_svds(model):
+    """Compute singular values of weight matrices in the MLP."""
+    svd_dict = {}
+
+    for name, param in model.named_parameters():
+        if "weight" in name:
+            # Compute SVD
+            weight_matrix = param.data.cpu().numpy()
+            u, s, vh = np.linalg.svd(weight_matrix, full_matrices=False)
+            svd_dict[name] = s  # Store singular values
+
+    return svd_dict
+
+def _sanitize_filename(s: str) -> str:
+    """Make a safe filename chunk from parameter name."""
+    # Replace anything not alnum, dash, underscore, or dot with underscore
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", s)
+
+def plot_svd_norms(svd_dict, save_dir, run_tag=None, use_logy=True, json_file_path=None, every_k_eval=1):
+    """
+    For each weight matrix in svd_dict, create a figure that plots its
+    singular values in descending order as a line plot, and save it.
+    
+    If json_file_path is provided, also plot the evolution of singular values
+    over training iterations from the JSON log.
+
+    Args:
+        svd_dict: dict[str, np.ndarray] mapping parameter name -> singular values (final state)
+        save_dir: directory to save PNGs
+        run_tag: optional string to include in filename (e.g., 'n1st_32')
+        use_logy: whether to use log scale for y-axis
+        json_file_path: optional path to JSON file with training history
+        every_k_eval: only plot every k-th evaluation from training history to reduce clutter
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Load training history if provided
+    training_data = None
+    if json_file_path and os.path.exists(json_file_path):
+        try:
+            with open(json_file_path, 'r') as f:
+                training_data = json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not load training data from {json_file_path}: {e}")
+    
+    for name, s in svd_dict.items():
+        # Ensure descending order explicitly (should already be)
+        s_sorted = np.sort(s)[::-1]
+        plt.figure(figsize=(10, 6))
+        
+        # Plot training evolution if available
+        if training_data:
+            weight_key = f"weight_compute_svds_{name}"
+            if weight_key in training_data:
+                iterations = training_data[weight_key]['iter']
+                values_history = training_data[weight_key]['value']  # Note: 'value' not 'vals'
+                
+                # Filter every k evaluations
+                filtered_iterations = iterations[::every_k_eval]
+                filtered_values = values_history[::every_k_eval]
+                
+                # Plot each iteration's singular values
+                for i, (iteration, svd_values) in enumerate(zip(filtered_iterations, filtered_values)):
+                    svd_sorted = np.sort(svd_values)[::-1]
+                    alpha = 0.5  # Fade in over time
+
+                    if iteration == -1:
+                        label = "Initial (epoch -1)"
+                        color = 'gray'
+                        linewidth = 2
+                    else:
+                        label = f"Epoch {iteration}"
+                        color = plt.cm.viridis(i / max(1, len(filtered_iterations) - 1))
+                        linewidth = 1.5
+                    
+                    print(f"Debug: Plotting iteration {iteration} with {len(svd_sorted)} singular values")
+                    plt.plot(np.arange(1, len(svd_sorted) + 1), svd_sorted, 
+                            color=color, alpha=alpha, linewidth=linewidth, 
+                            marker='o' if len(svd_sorted) <= 10 else None, 
+                            markersize=3, label=label)
+            else:
+                print(f"Debug: Key '{weight_key}' NOT found in training data")
+        
+        # Plot final state (from svd_dict) with emphasis
+        plt.plot(np.arange(1, len(s_sorted) + 1), s_sorted, 
+                color='red', linewidth=2, marker='o', markersize=3, 
+                label="Final state", alpha=0.9)
+        
+        if use_logy:
+            plt.yscale("log")
+            ylabel = "Singular value (log)"
+        else:
+            ylabel = "Singular value"
+            
+        plt.xlabel("Index (descending order)")
+        plt.ylabel(ylabel)
+        plt.title(f"SVD Evolution: {name}")
+        plt.grid(True, alpha=0.3)
+        
+        # Handle legend - only show if we have training data
+        if training_data and f"weight_compute_svds_{name}" in training_data:
+            # Limit legend entries to avoid clutter
+            handles, labels = plt.gca().get_legend_handles_labels()
+            if len(handles) > 10:
+                # Show initial, final, and a few intermediate points
+                indices_to_show = [0] + list(range(1, len(handles)-1, max(1, (len(handles)-2)//5))) + [len(handles)-1]
+                handles = [handles[i] for i in indices_to_show]
+                labels = [labels[i] for i in indices_to_show]
+            plt.legend(handles, labels, bbox_to_anchor=(1.05, 1), loc='upper left')
+        else:
+            plt.legend()
+            
+        plt.tight_layout()
+
+        tag = f"_{run_tag}" if run_tag else ""
+        fname = f"svd_{_sanitize_filename(name)}{tag}.png"
+        out_path = os.path.join(save_dir, fname)
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
+        plt.close()
+        
+        print(f"SVD evolution plot saved to: {out_path}")
 
 
 def plot_deriv_sweep_results(results, save_path):
@@ -277,7 +412,7 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     # 1st order training points to sweep (exponential spacing)
-    n_train_1st_list = [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+    n_train_1st_list = [0]  # Only train with 0 derivative points
 
     # Store results
     results = []
@@ -315,7 +450,7 @@ def main():
             config,
             n_train_0th=args.n_train_0th,
             n_train_1st=n_train_1st,
-            k=2,  # sin(2x)
+            k=args.k,
         )
 
         # Create model
@@ -332,6 +467,7 @@ def main():
             eval_every=args.eval_every,
             exp_dir=os.path.join(args.save_dir, f"n1st_{n_train_1st}"),
             optimizer_name=args.optimizer,
+            weight_evals=[compute_svds],
         )
 
         # Extract results
@@ -348,6 +484,7 @@ def main():
 
         # Compute weight norms
         weight_norms = compute_weight_norms(model)
+        svd_dict = compute_svds(model)
 
         # Store results
         result = {
@@ -358,6 +495,7 @@ def main():
             "l_inf_test": l_inf_test,
             "l2re_test": l2re_test,
             "weight_norms": weight_norms,
+            "singular_values": svd_dict,
         }
         results.append(result)
 
@@ -368,6 +506,20 @@ def main():
             weight_norms,
             os.path.join(args.save_dir, f"weight_norms_n1st_{n_train_1st}.png"),
         )
+        # NEW: plot SVDs per layer for this run
+        json_log_path = os.path.join(
+            args.save_dir, f"n1st_{n_train_1st}", 
+            f"mlp_hdim{args.hidden_dim}_layers{args.n_layers}.json"
+        )
+        
+        plot_svd_norms(
+            svd_dict,
+            save_dir=args.save_dir,
+            run_tag=f"n1st_{n_train_1st}",
+            use_logy=True,
+            json_file_path=json_log_path,
+            every_k_eval=args.svd_plot_every,
+        )
 
         # Save custom solution plot for this run
         title_suffix = f" (n_1st={n_train_1st})"
@@ -376,6 +528,13 @@ def main():
             model,
             os.path.join(args.save_dir, f"solution_n1st_{n_train_1st}.png"),
             title_suffix,
+        )
+
+        # Plot training curves (loss and eval metrics) from JSON log
+        json_log_path = os.path.join(
+            args.save_dir, f"n1st_{n_train_1st}", 
+            f"mlp_hdim{args.hidden_dim}_layers{args.n_layers}",
+            f"mlp_hdim{args.hidden_dim}_layers{args.n_layers}.json"
         )
 
         # Save model
@@ -391,6 +550,8 @@ def main():
         for r in results:
             json_r = r.copy()
             json_r["weight_norms"] = {k: float(v) for k, v in r["weight_norms"].items()}
+            # Convert singular values numpy arrays to lists
+            json_r["singular_values"] = {k: v.tolist() for k, v in r["singular_values"].items()}
             json_results.append(json_r)
         json.dump(json_results, f, indent=2)
 
@@ -414,7 +575,10 @@ def main():
     print(f"  - deriv_sweep_l2re.png: L2RE vs n_train_1st plot")
     print(f"  - weight_norms_n1st_*.png: Weight norm plots for each run")
     print(f"  - solution_n1st_*.png: Custom solution plots for each run")
+    print(f"  - training_curves_n1st_*.png: Loss and L2RE training curves for each run")
+    print(f"  - svd_*_n1st_*.png: Singular value plots for each layer and run")
     print(f"  - model_n1st_*.pt: Trained model states")
+    print(f"  - n1st_*/mlp_hdim*_layers*.json: Training logs with SVD data for each run")
 
 
 if __name__ == "__main__":

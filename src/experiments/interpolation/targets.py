@@ -272,6 +272,7 @@ class SineTarget(BaseFcn):
         logger: Logger = None,
         lr_schedule: bool = True,
         gradient_clip: float = 1.0,
+        weight_evals: List[Callable] = [],
     ):
         """Train model using standard optimizers (Adam, SGD, etc.)."""
         if logger is None:
@@ -288,6 +289,42 @@ class SineTarget(BaseFcn):
         print("Training model...")
         start_time = time()
         iter_times = []
+
+        # Initial evaluation at epoch 0 (before any optimization steps)
+        print("Running initial evaluation at epoch 0...")
+        eval_nodes = eval_sampler()
+        u_eval = model(eval_nodes)
+        u_true = self.get_function(eval_nodes)
+        
+        with torch.no_grad():
+            for eval_metric in eval_metrics:
+                eval_metric_value = eval_metric(u_eval, u_true)
+                # Ensure the metric value is a scalar for JSON serialization
+                if hasattr(eval_metric_value, "item"):
+                    eval_metric_value = eval_metric_value.item()
+                logger.log(
+                    f"eval_{eval_metric.__name__}", eval_metric_value, -1
+                )
+
+        # Evaluate weights if weight_evals provided (initial state) - outside no_grad
+        for weight_eval in weight_evals:
+            weight_eval_result = weight_eval(model, u_eval=u_eval, u_true= u_true)
+            # Handle different types of weight evaluation results
+            if isinstance(weight_eval_result, dict):
+                # For dict results (like SVD), convert numpy arrays to lists and store each key
+                for key, value in weight_eval_result.items():
+                    if hasattr(value, 'tolist'):  # numpy array
+                        logger.log(f"weight_{weight_eval.__name__}_{key}", value.tolist(), -1)
+                    elif hasattr(value, 'item'):  # scalar tensor
+                        logger.log(f"weight_{weight_eval.__name__}_{key}", value.item(), -1)
+                    else:  # regular python types
+                        logger.log(f"weight_{weight_eval.__name__}_{key}", value, -1)
+            elif hasattr(weight_eval_result, "tolist"):  # numpy array
+                logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.tolist(), -1)
+            elif hasattr(weight_eval_result, "item"):  # scalar tensor
+                logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.item(), -1)
+            else:  # regular python types (float, int, list, etc.)
+                logger.log(f"weight_{weight_eval.__name__}", weight_eval_result, -1)
 
         for epoch in tqdm(range(n_epochs)):
             iter_start_time = time()
@@ -338,11 +375,11 @@ class SineTarget(BaseFcn):
                     )
 
                 # Evaluate solution
+                eval_nodes = eval_sampler()
+                u_eval = model(eval_nodes)
+                u_true = self.get_function(eval_nodes)
+                
                 with torch.no_grad():
-                    eval_nodes = eval_sampler()
-                    u_eval = model(eval_nodes)
-                    u_true = self.get_function(eval_nodes)
-
                     for eval_metric in eval_metrics:
                         eval_metric_value = eval_metric(u_eval, u_true)
                         # Ensure the metric value is a scalar for JSON serialization
@@ -351,6 +388,26 @@ class SineTarget(BaseFcn):
                         logger.log(
                             f"eval_{eval_metric.__name__}", eval_metric_value, epoch
                         )
+
+                # Evaluate weights if weight_evals provided - outside no_grad
+                for weight_eval in weight_evals:
+                    weight_eval_result = weight_eval(model, u_eval=u_eval, u_true=u_true)
+                    # Handle different types of weight evaluation results
+                    if isinstance(weight_eval_result, dict):
+                        # For dict results (like SVD), convert numpy arrays to lists and store each key
+                        for key, value in weight_eval_result.items():
+                            if hasattr(value, 'tolist'):  # numpy array
+                                logger.log(f"weight_{weight_eval.__name__}_{key}", value.tolist(), epoch)
+                            elif hasattr(value, 'item'):  # scalar tensor
+                                logger.log(f"weight_{weight_eval.__name__}_{key}", value.item(), epoch)
+                            else:  # regular python types
+                                logger.log(f"weight_{weight_eval.__name__}_{key}", value, epoch)
+                    elif hasattr(weight_eval_result, "tolist"):  # numpy array
+                        logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.tolist(), epoch)
+                    elif hasattr(weight_eval_result, "item"):  # scalar tensor
+                        logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.item(), epoch)
+                    else:  # regular python types (float, int, list, etc.)
+                        logger.log(f"weight_{weight_eval.__name__}", weight_eval_result, epoch)
 
                 current_time = time() - start_time
                 print(f"Epoch {epoch + 1} completed in {current_time:.2f} seconds")
@@ -433,6 +490,7 @@ class SineTarget(BaseFcn):
         eval_every: int = 100,
         save_dir: str = None,
         logger: Logger = None,
+        weight_evals: List[Callable] = [],
     ):
         """Train model using SSBroyden optimizer."""
         if logger is None:
@@ -444,6 +502,42 @@ class SineTarget(BaseFcn):
 
         print("Training model with SSBroyden...")
         start_time = time()
+
+        # Initial evaluation at epoch 0 (before any optimization steps)
+        print("Running initial evaluation at epoch 0...")
+        u_eval = model(eval_nodes)
+        u_true = self.get_function(eval_nodes)
+        
+        with torch.no_grad():
+            for eval_metric in eval_metrics:
+                eval_metric_value = eval_metric(u_eval, u_true)
+                # Ensure the metric value is a scalar for JSON serialization
+                if hasattr(eval_metric_value, "item"):
+                    eval_metric_value = eval_metric_value.item()
+                logger.log(
+                    f"eval_{eval_metric.__name__}", eval_metric_value, -1
+                )
+
+        # Evaluate weights if weight_evals provided (initial state) - outside no_grad
+        if weight_evals is not None:
+            for weight_eval in weight_evals:
+                weight_eval_result = weight_eval(model, u_eval=u_eval, u_true=u_true)
+                # Handle different types of weight evaluation results
+                if isinstance(weight_eval_result, dict):
+                    # For dict results (like SVD), convert numpy arrays to lists and store each key
+                    for key, value in weight_eval_result.items():
+                        if hasattr(value, 'tolist'):  # numpy array
+                            logger.log(f"weight_{weight_eval.__name__}_{key}", value.tolist(), -1)
+                        elif hasattr(value, 'item'):  # scalar tensor
+                            logger.log(f"weight_{weight_eval.__name__}_{key}", value.item(), -1)
+                        else:  # regular python types
+                            logger.log(f"weight_{weight_eval.__name__}_{key}", value, -1)
+                elif hasattr(weight_eval_result, "tolist"):  # numpy array
+                    logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.tolist(), -1)
+                elif hasattr(weight_eval_result, "item"):  # scalar tensor
+                    logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.item(), -1)
+                else:  # regular python types (float, int, list, etc.)
+                    logger.log(f"weight_{weight_eval.__name__}", weight_eval_result, -1)
 
         # Define closure for SSBroyden
         def closure():
@@ -465,10 +559,10 @@ class SineTarget(BaseFcn):
                     print("Running final evaluation before ending training...")
 
                     # Run final evaluation
+                    u_eval = model(eval_nodes)
+                    u_true = self.get_function(eval_nodes)
+                    
                     with torch.no_grad():
-                        u_eval = model(eval_nodes)
-                        u_true = self.get_function(eval_nodes)
-
                         for eval_metric in eval_metrics:
                             eval_metric_value = eval_metric(u_eval, u_true)
                             # Ensure the metric value is a scalar for JSON serialization
@@ -477,6 +571,26 @@ class SineTarget(BaseFcn):
                             logger.log(
                                 f"eval_{eval_metric.__name__}", eval_metric_value, epoch
                             )
+
+                    # Evaluate weights if weight_evals provided (early termination case) - outside no_grad
+                    for weight_eval in weight_evals:
+                        weight_eval_result = weight_eval(model, u_eval=u_eval, u_true=u_true)
+                        # Handle different types of weight evaluation results
+                        if isinstance(weight_eval_result, dict):
+                            # For dict results (like SVD), convert numpy arrays to lists and store each key
+                            for key, value in weight_eval_result.items():
+                                if hasattr(value, 'tolist'):  # numpy array
+                                    logger.log(f"weight_{weight_eval.__name__}_{key}", value.tolist(), epoch)
+                                elif hasattr(value, 'item'):  # scalar tensor
+                                    logger.log(f"weight_{weight_eval.__name__}_{key}", value.item(), epoch)
+                                else:  # regular python types
+                                    logger.log(f"weight_{weight_eval.__name__}_{key}", value, epoch)
+                        elif hasattr(weight_eval_result, "tolist"):  # numpy array
+                            logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.tolist(), epoch)
+                        elif hasattr(weight_eval_result, "item"):  # scalar tensor
+                            logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.item(), epoch)
+                        else:  # regular python types (float, int, list, etc.)
+                            logger.log(f"weight_{weight_eval.__name__}", weight_eval_result, epoch)
 
                     current_time = time() - start_time
                     print(f"Final evaluation at epoch {epoch + 1} (terminated early)")
@@ -520,10 +634,10 @@ class SineTarget(BaseFcn):
                     )
 
                 # Evaluate solution
+                u_eval = model(eval_nodes)
+                u_true = self.get_function(eval_nodes)
+                
                 with torch.no_grad():
-                    u_eval = model(eval_nodes)
-                    u_true = self.get_function(eval_nodes)
-
                     for eval_metric in eval_metrics:
                         eval_metric_value = eval_metric(u_eval, u_true)
                         # Ensure the metric value is a scalar for JSON serialization
@@ -532,6 +646,26 @@ class SineTarget(BaseFcn):
                         logger.log(
                             f"eval_{eval_metric.__name__}", eval_metric_value, epoch
                         )
+
+                # Evaluate weights if weight_evals provided - outside no_grad
+                for weight_eval in weight_evals:
+                    weight_eval_result = weight_eval(model, u_eval=u_eval, u_true=u_true)
+                    # Handle different types of weight evaluation results
+                    if isinstance(weight_eval_result, dict):
+                        # For dict results (like SVD), convert numpy arrays to lists and store each key
+                        for key, value in weight_eval_result.items():
+                            if hasattr(value, 'tolist'):  # numpy array
+                                logger.log(f"weight_{weight_eval.__name__}_{key}", value.tolist(), epoch)
+                            elif hasattr(value, 'item'):  # scalar tensor
+                                logger.log(f"weight_{weight_eval.__name__}_{key}", value.item(), epoch)
+                            else:  # regular python types
+                                logger.log(f"weight_{weight_eval.__name__}_{key}", value, epoch)
+                    elif hasattr(weight_eval_result, "tolist"):  # numpy array
+                        logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.tolist(), epoch)
+                    elif hasattr(weight_eval_result, "item"):  # scalar tensor
+                        logger.log(f"weight_{weight_eval.__name__}", weight_eval_result.item(), epoch)
+                    else:  # regular python types (float, int, list, etc.)
+                        logger.log(f"weight_{weight_eval.__name__}", weight_eval_result, epoch)
 
                 current_time = time() - start_time
                 print(f"Epoch {epoch + 1} completed in {current_time:.2f} seconds")
@@ -599,6 +733,7 @@ class SineTarget(BaseFcn):
         logger: Logger = None,
         lr_schedule: bool = True,
         gradient_clip: float = 1.0,
+        weight_evals: List[Callable] = [],
         **kwargs,
     ):
         """Unified training method that routes to appropriate training implementation."""
@@ -616,6 +751,7 @@ class SineTarget(BaseFcn):
                 eval_every,
                 save_dir,
                 logger,
+                weight_evals,
             )
         else:
             print(f"Using standard training for {optimizer_name}")
@@ -631,6 +767,7 @@ class SineTarget(BaseFcn):
                 logger,
                 lr_schedule,
                 gradient_clip,
+                weight_evals,
             )
 
 

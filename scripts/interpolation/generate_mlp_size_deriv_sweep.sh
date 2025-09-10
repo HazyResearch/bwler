@@ -6,24 +6,24 @@
 # Configuration
 TARGET="sine"
 SEED=0
-N_TRAIN_0TH=100  # points for value loss
-N_TRAIN_1ST=100  # points for derivative loss
+N_TRAIN_0TH=200  # points for value loss
+N_TRAIN_1ST=0  # points for derivative loss
 N_TEST=1000
 N_EPOCHS=10000
 EVAL_EVERY=1000
-SAVE_ROOT="/pscratch/sd/j/jwl50/bwler/plots/interpolation"
+SAVE_ROOT="/scr/biggest/junmiaoh/bwler/plots/interpolation"
 DERIV_ALPHA=1.0
 DERIV_BETA=1.0
 
 # MLP configurations to test
-LAYERS_LIST=(2 3)
+LAYERS_LIST=(2 3 4 5)
 HDIM_LIST=(32 64 128)
 
 # Derivative points to sweep (exponential spacing)
-DERIV_POINTS_LIST=(0 1 2 4 8 16 32 64 128 256 512 1024)
+DERIV_POINTS_LIST=(0)
 
 # Create scripts directory if it doesn't exist
-mkdir -p /pscratch/sd/j/jwl50/bwler/scripts/interpolation/mlp_size_deriv_sweeps
+mkdir -p /scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_deriv_sweeps
 
 # Function to generate sbatch script for a given optimizer
 generate_sbatch_script() {
@@ -37,40 +37,40 @@ generate_sbatch_script() {
         local N_EPOCHS_OPT=10000     # SSBroyden: 10000 epochs for full training
         local EVAL_EVERY_OPT=1000    # SSBroyden: log every 1000 epochs
         local JOB_TIME="4:00:00"     # SSBroyden: longer job time
+        local PLOT_EVERY=1
+
     else
-        local N_EPOCHS_OPT=20000     # Adam: 20000 epochs for full training
+        local N_EPOCHS_OPT=40000     # Adam: 20000 epochs for full training
         local EVAL_EVERY_OPT=1000    # Adam: log every 1000 epochs
         local JOB_TIME="4:00:00"     # Adam: longer job time
+        local PLOT_EVERY=2
     fi
     
     local CONFIG_NAME="layers${LAYERS}_hdim${HDIM}"
     local SAVE_DIR="${SAVE_ROOT}/mlp_size_sweep_${OPTIMIZER_LOWER}/${CONFIG_NAME}"
     
     # Create the sbatch script
-    cat > "/pscratch/sd/j/jwl50/bwler/scripts/interpolation/mlp_size_deriv_sweeps/mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}_deriv_sweep.sbatch" << EOF
+    cat > "/scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_deriv_sweeps/mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}_deriv_sweep.sbatch" << EOF
+
 #!/bin/bash
 #SBATCH --job-name=mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}
 #SBATCH --time=${JOB_TIME}
-#SBATCH --account=m1266
-#SBATCH -C gpu
-#SBATCH -q regular
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=1
+#SBATCH --account=hazy
+#SBATCH --partition=hazy
+#SBATCH --gres gpu:1
 #SBATCH --cpus-per-task=32
 #SBATCH --output=mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}_%j.out
 #SBATCH --error=mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}_%j.err
 
 # Environment
-module load python
-conda activate /pscratch/sd/j/jwl50/bwler/.pyenv
+source /scr/biggest/junmiaoh/bwler/.venv/bin/activate
 
 export OMP_NUM_THREADS=\${SLURM_CPUS_PER_TASK:-32}
 export PYTHONUNBUFFERED=1
 export MPICH_GPU_SUPPORT_ENABLED=1
 
 # Navigate to project
-cd /pscratch/sd/j/jwl50/bwler/
+cd /scr/biggest/junmiaoh/bwler/
 mkdir -p "${SAVE_DIR}"
 
 echo "Starting MLP ${CONFIG_NAME} derivative sweep with ${OPTIMIZER}"
@@ -91,7 +91,8 @@ python scripts/interpolation/run_mlp_deriv_sweep.py \\
     --hidden_dim "${HDIM}" \\
     --deriv_alpha "${DERIV_ALPHA}" \\
     --deriv_beta "${DERIV_BETA}" \\
-    --optimizer "${OPTIMIZER_LOWER}"
+    --optimizer "${OPTIMIZER_LOWER}" \\
+    --svd_plot_every "${PLOT_EVERY}" \\
 
 echo "Completed MLP ${CONFIG_NAME} derivative sweep with ${OPTIMIZER}"
 EOF
@@ -142,13 +143,13 @@ done
 
 echo ""
 echo "To submit all Adam jobs, run:"
-echo "  cd /pscratch/sd/j/jwl50/bwler/scripts/interpolation/mlp_size_deriv_sweeps"
+echo "  cd /scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_deriv_sweeps"
 echo "  for script in mlp_*_adam_deriv_sweep.sbatch; do"
 echo "    sbatch \$script"
 echo "  done"
 echo ""
 echo "To submit all SSBroyden jobs, run:"
-echo "  cd /pscratch/sd/j/jwl50/bwler/scripts/interpolation/mlp_size_deriv_sweeps"
+echo "  cd /scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_deriv_sweeps"
 echo "  for script in mlp_*_ssbroyden_deriv_sweep.sbatch; do"
 echo "    sbatch \$script"
 echo "  done"

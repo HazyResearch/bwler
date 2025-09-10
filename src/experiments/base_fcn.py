@@ -219,6 +219,10 @@ class BaseFcn:
                 "constructor": torch.optim.Adam,
                 "kwargs": {"lr": 1e-3},
             },
+            "sgd": {
+                "constructor": torch.optim.SGD,
+                "kwargs": {"lr": 1e-3, "momentum": 0.9},
+            },
             "lbfgs": {
                 "constructor": torch.optim.LBFGS,
                 "kwargs": {
