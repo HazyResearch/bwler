@@ -69,12 +69,15 @@ class ModelConfig:
 
     hidden_dim: int
     n_layers: int
-    activation = torch.tanh
-    device: str = "cuda"
+    activation = torch.nn.Tanh()
+    learning_rate: float = 1e-3
+    device: str = "cpu"
     dtype: torch.dtype = torch.float64
+    embedding: str = "none"
+    embedding_M: Optional[int] = None
 
     @property
-    def learning_rate(self) -> float:
+    def adaptive_learning_rate(self) -> float:
         """Compute adaptive learning rate based on architecture."""
         return (
             0.05

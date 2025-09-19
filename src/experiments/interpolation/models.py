@@ -23,6 +23,8 @@ def create_mlp(config: ModelConfig) -> MLP:
         activation=config.activation,
         device=config.device,
         dtype=config.dtype,
+        embedding=config.embedding,
+        embedding_M=config.embedding_M,
     )
 
 
@@ -82,6 +84,34 @@ def train_and_evaluate_model(
         weight_evals=weight_evals,
     )
 
+    # Check if training terminated early due to SSBroyden NaN and load checkpoint if available
+    optimizer_name = optimizer.__class__.__name__
+    if "SSBroyden" in optimizer_name or "SSbroyden" in optimizer_name:
+        # Look for the final early termination checkpoint first
+        early_termination_checkpoint = os.path.join(exp_dir, "checkpoint_final_early_termination.pth")
+        if os.path.exists(early_termination_checkpoint):
+            print("Loading final early termination checkpoint for evaluation")
+            model.load_state_dict(torch.load(early_termination_checkpoint, map_location=model.device if hasattr(model, 'device') else 'cpu'))
+        else:
+            # If no early termination checkpoint, look for the latest regular checkpoint
+            import glob
+            checkpoint_pattern = os.path.join(exp_dir, "checkpoint_*.pth")
+            checkpoint_files = glob.glob(checkpoint_pattern)
+            
+            if checkpoint_files:
+                # Extract epoch numbers and find the latest one (excluding early termination)
+                regular_checkpoints = [f for f in checkpoint_files if "early_termination" not in f]
+                if regular_checkpoints:
+                    def extract_epoch(filename):
+                        import re
+                        match = re.search(r'checkpoint_(\d+)\.pth', filename)
+                        return int(match.group(1)) if match else -1
+                    
+                    latest_checkpoint = max(regular_checkpoints, key=extract_epoch)
+                    latest_epoch = extract_epoch(latest_checkpoint)
+                    print(f"Loading latest regular checkpoint from epoch {latest_epoch}")
+                    model.load_state_dict(torch.load(latest_checkpoint, map_location=model.device if hasattr(model, 'device') else 'cpu'))
+
     with torch.no_grad():
         u_pred_train = model([target.train_points])
         u_pred_test = model([target.test_points])
@@ -108,8 +138,13 @@ def run_mlp_experiment(
     weight_evals: List[Callable] = [],
 ) -> dict:
     """Run MLP experiment for a single architecture."""
+    embedding_str = f"_embed_{config.embedding}"
+    if config.embedding_M is not None:
+        embedding_str += f"_M{config.embedding_M}"
+    
     print(
-        f"Running MLP experiment (hidden_dim={config.hidden_dim}, n_layers={config.n_layers})"
+        f"Running MLP experiment (hidden_dim={config.hidden_dim}, n_layers={config.n_layers}, "
+        f"embedding={config.embedding}{f', M={config.embedding_M}' if config.embedding_M else ''})"
     )
 
     # Create model and optimizer
@@ -122,7 +157,7 @@ def run_mlp_experiment(
         lr=config.learning_rate,
     )
 
-    # Create logger
+    # Create logger with original naming convention (no embedding suffix)
     logger = Logger(
         path=os.path.join(
             exp_dir, f"mlp_hdim{config.hidden_dim}_layers{config.n_layers}.json"
@@ -131,7 +166,7 @@ def run_mlp_experiment(
 
     # Create subdirectory for this specific model configuration
     model_subdir = os.path.join(
-        exp_dir, f"mlp_hdim{config.hidden_dim}_layers{config.n_layers}"
+        exp_dir, f"mlp_hdim{config.hidden_dim}_layers{config.n_layers}{embedding_str}"
     )
     os.makedirs(model_subdir, exist_ok=True)
 

@@ -546,6 +546,9 @@ class SineTarget(BaseFcn):
             loss.backward()
             return loss
 
+        # Track last valid checkpoint epoch
+        last_valid_checkpoint = None
+
         # Training loop
         for epoch in tqdm(range(n_epochs)):
             # Optimize
@@ -556,9 +559,21 @@ class SineTarget(BaseFcn):
                     print(
                         f"SSBroyden terminated due to NaN in rho_k_minus at epoch {epoch + 1}"
                     )
-                    print("Running final evaluation before ending training...")
+                    
+                    # Load the last valid checkpoint if available
+                    if last_valid_checkpoint is not None and save_dir is not None:
+                        checkpoint_path = os.path.join(save_dir, f"checkpoint_{last_valid_checkpoint}.pth")
+                        if os.path.exists(checkpoint_path):
+                            print(f"Loading last valid checkpoint from epoch {last_valid_checkpoint}")
+                            model.load_state_dict(torch.load(checkpoint_path, map_location=model.device if hasattr(model, 'device') else 'cpu'))
+                        else:
+                            print(f"Warning: Checkpoint file {checkpoint_path} not found")
+                    else:
+                        print("No valid checkpoint available to load")
 
-                    # Run final evaluation
+                    print("Running final evaluation with loaded checkpoint model...")
+
+                    # Run final evaluation with loaded model
                     u_eval = model(eval_nodes)
                     u_true = self.get_function(eval_nodes)
                     
@@ -593,9 +608,9 @@ class SineTarget(BaseFcn):
                             logger.log(f"weight_{weight_eval.__name__}", weight_eval_result, epoch)
 
                     current_time = time() - start_time
-                    print(f"Final evaluation at epoch {epoch + 1} (terminated early)")
+                    print(f"Final evaluation at epoch {epoch + 1} (terminated early, using checkpoint from epoch {last_valid_checkpoint})")
 
-                    # Save final checkpoint
+                    # Save final checkpoint (the loaded one)
                     if save_dir is not None:
                         torch.save(
                             model.state_dict(),
@@ -632,6 +647,8 @@ class SineTarget(BaseFcn):
                         model.state_dict(),
                         os.path.join(save_dir, f"checkpoint_{epoch}.pth"),
                     )
+                    # Update last valid checkpoint
+                    last_valid_checkpoint = epoch
 
                 # Evaluate solution
                 u_eval = model(eval_nodes)

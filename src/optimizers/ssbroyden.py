@@ -271,7 +271,7 @@ class SSBroyden2(Optimizer):
             )
             # Use the last good sqrt_arg value instead of a small fallback
             sqrt_arg = self._last_good_sqrt_arg
-        elif sqrt_arg > 10:
+        elif sqrt_arg > 2.0:
             print(
                 f"WARNING: sqrt argument too large (sqrt_arg={sqrt_arg.item():.6f}), using last good value: {self._last_good_sqrt_arg.item():.6f}"
             )

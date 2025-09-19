@@ -1,43 +1,61 @@
 import torch
 import torch.nn as nn
-from typing import List, Union
+from typing import List, Union, Optional
+
+from .embeddings import make_embedding, infer_embedding_dim
 
 
 class MLP(nn.Module):
     def __init__(
         self,
         n_dim: int = 1,
-        n_layers: int = 2,
+        n_layers: int = 3,
         hidden_dim: int = 32,
-        activation: torch.nn.Module = torch.tanh,
+        activation = torch.nn.Tanh(),
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
+        embedding: str = "none",
+        embedding_M: Optional[int] = None,
     ):
         """
         2-layer MLP that maps (B, n_dim) -> (B, 1)
 
         Args:
             hidden_dim: Dimension of hidden layer
-            activation: Activation function to use (default: ReLU)
+            activation: Activation function (torch.nn module, default: Tanh)
         """
         super().__init__()
-        self.device = torch.device(device)
-        self.dtype = dtype
         self.n_dim = n_dim
-        self.activation = activation
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
-        self.fc = nn.ModuleList(
-            [nn.Linear(self.n_dim, self.hidden_dim, device=device, dtype=dtype)]
-            + [
-                nn.Linear(self.hidden_dim, self.hidden_dim, device=device, dtype=dtype)
-                for _ in range(self.n_layers - 2)
-            ]
-            + [nn.Linear(self.hidden_dim, 1, device=device, dtype=dtype)]
-        )
+        self.activation_fn = activation
         self.device = device
+        self.dtype = dtype
+        self.embedding_type = embedding
 
-        print(f"MLP architecture: {self.fc}")
+        # Create embedding layer
+        self.embedding = make_embedding(
+            kind=embedding, M=embedding_M, dtype=dtype, device=device
+        )
+
+        # Adjust input dimension based on embedding
+        embedded_dim = self.embedding.output_dim
+
+        # Build layers with embedding-adjusted input dimension
+        layers = []
+        layers.append(nn.Linear(embedded_dim, hidden_dim, dtype=dtype))
+        layers.append(self.activation_fn)
+
+        for _ in range(n_layers - 2):
+            layers.append(nn.Linear(hidden_dim, hidden_dim, dtype=dtype))
+            layers.append(self.activation_fn)
+
+        layers.append(nn.Linear(hidden_dim, 1, dtype=dtype))
+
+        self.network = nn.Sequential(*layers)
+        self.to(device)
+
+        print(f"MLP architecture: {self.network}")
 
     def make_grid(self, x: List[torch.Tensor]):
         # Form the meshgrid of points
@@ -77,18 +95,17 @@ class MLP(nn.Module):
     def interpolate(self, x: List[torch.Tensor]):
         return self.forward(x)
 
-    def forward(self, x: Union[List[torch.Tensor], torch.Tensor]) -> torch.Tensor:
-        """
-        Forward pass of the network
-        Args:
-            x: List of tensors of shapes (m1,), (m2,), ..., (m_ndim,) - points to evaluate at
-        Returns:
-            Tensor of shape (m1, m2, ..., m_ndim) - interpolated values
-        """
-        if isinstance(x, list) or isinstance(x, tuple):
-            x_mesh = self.make_grid(x)
-            return self.forward_grid(x_mesh)
-        elif isinstance(x, torch.Tensor):
-            return self.forward_batch(x)
-        else:
-            raise ValueError(f"Expected list of tensors or tensor, got {type(x)}")
+    def forward(self, inputs: List[torch.Tensor]) -> torch.Tensor:
+        x = inputs[0]  # Assuming single input tensor for 1D problems
+
+        # Apply embedding
+        x_embedded = self.embedding(x)
+
+        return self.network(x_embedded).squeeze(-1)
+    def forward(self, inputs: List[torch.Tensor]) -> torch.Tensor:
+        x = inputs[0]  # Assuming single input tensor for 1D problems
+
+        # Apply embedding
+        x_embedded = self.embedding(x)
+
+        return self.network(x_embedded).squeeze(-1)

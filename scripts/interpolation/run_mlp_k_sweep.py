@@ -75,7 +75,7 @@ def parse_args():
     parser.add_argument(
         "--k_values",
         type=str,
-        default="1.0,2.0,4.0,8.0",
+        default="1.0,2.0,4.0,8.0,16.0,32.0,64.0",
         help="Comma-separated list of wavenumbers to sweep over (e.g., '1.0,2.0,4.0,8.0')",
     )
     parser.add_argument(
@@ -83,6 +83,20 @@ def parse_args():
         type=int,
         default=2,
         help="Plot every k-th evaluation in SVD evolution plots to reduce clutter",
+    )
+    # Embedding arguments
+    parser.add_argument(
+        "--embedding",
+        type=str,
+        default="none",
+        choices=["none", "theta", "cheb", "bary"],
+        help="Embedding to use: 'none', 'theta', 'cheb', or 'bary'"
+    )
+    parser.add_argument(
+        "--embedding_M",
+        type=int,
+        default=None,
+        help="Feature count for 'cheb' or degree for 'bary' embedding"
     )
     return parser.parse_args()
 
@@ -288,9 +302,6 @@ def plot_psd_heatmap(json_file_path, save_path, every_k_eval=1):
     # Convert to numpy array: (n_iterations, n_frequencies)
     psd_array = np.array(psd_history)
     n_iters, n_freqs = psd_array.shape
-    
-    # Create frequency axis (assuming normalized frequencies from FFT)
-    frequencies = np.arange(n_freqs)
     
     plt.figure(figsize=(12, 8))
     
@@ -797,6 +808,124 @@ def plot_sine_target_solution(target, model, save_path, title_suffix=""):
     plt.close()
 
 
+def plot_data_periodogram_comparison(target, save_path, title_suffix=""):
+    """
+    Compare the periodogram of training data vs evaluation data to verify
+    that training data is representative of the target function's frequency content.
+    This is done before any training to check data quality.
+    """
+    plt.figure(figsize=(15, 10))
+    
+    # Create subplots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Interpolate both training and test data onto a common high-resolution grid
+    # Use a grid that's dense enough to capture the frequency content
+    x_dense = torch.linspace(-1, 1, 2048, device=target.test_points.device, dtype=target.test_points.dtype)
+    
+    # Get true function values on dense grid
+    true_values_dense = target.get_function([x_dense])
+    
+    # Interpolate training data onto dense grid (simple linear interpolation)
+    train_x = target.train_points_0th.cpu().numpy()
+    train_y = target.train_values_0th.cpu().numpy()
+    
+    # Sort training points for interpolation
+    sort_idx = np.argsort(train_x)
+    train_x_sorted = train_x[sort_idx]
+    train_y_sorted = train_y[sort_idx]
+    
+    # Interpolate training data to dense grid
+    train_interp = np.interp(x_dense.cpu().numpy(), train_x_sorted, train_y_sorted)
+    train_interp_tensor = torch.tensor(train_interp, device=x_dense.device, dtype=x_dense.dtype)
+    
+    # Compute periodograms using the same method as in training
+    def compute_psd_from_signal(signal):
+        """Compute PSD using the same windowing as in training."""
+        # Drop duplicate point at the seam and apply Hann window
+        signal_windowed = signal[:-1]  # Remove duplicate
+        N = signal_windowed.shape[-1]
+        dx = 2.0 / N
+        
+        # Create Hann window
+        n = torch.arange(N, device=signal.device, dtype=signal.dtype)
+        w = 0.5 - 0.5 * torch.cos(2 * torch.pi * n / N)
+        
+        # Apply window
+        xw = signal_windowed * w
+        
+        # Compute FFT
+        X = torch.fft.rfft(xw, dim=-1)
+        
+        # Scale for energy conservation
+        Wpow = (w**2).sum()
+        Sxx = (X.abs()**2) * (dx / Wpow)
+        
+        return Sxx.cpu().numpy()
+    
+    # Compute PSDs
+    true_psd = compute_psd_from_signal(true_values_dense)
+    train_psd = compute_psd_from_signal(train_interp_tensor)
+    
+    # Create frequency axis
+    N = len(true_values_dense) - 1  # After dropping duplicate
+    freqs = np.fft.rfftfreq(N, d=2.0/N)  # Frequency bins
+    
+    # Plot 1: True function
+    axes[0, 0].plot(x_dense.cpu().numpy(), true_values_dense.cpu().numpy(), 'b-', linewidth=2, label='True Function')
+    axes[0, 0].scatter(train_x, train_y, c='red', s=20, alpha=0.7, label=f'Training Points (n={len(train_x)})')
+    axes[0, 0].set_title(f'Function Comparison{title_suffix}')
+    axes[0, 0].set_xlabel('x')
+    axes[0, 0].set_ylabel('u(x)')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # Plot 2: Interpolated training data
+    axes[0, 1].plot(x_dense.cpu().numpy(), true_values_dense.cpu().numpy(), 'b-', linewidth=2, label='True Function')
+    axes[0, 1].plot(x_dense.cpu().numpy(), train_interp, 'r--', linewidth=2, alpha=0.8, label='Interpolated Training')
+    axes[0, 1].set_title(f'Training Data Interpolation{title_suffix}')
+    axes[0, 1].set_xlabel('x')
+    axes[0, 1].set_ylabel('u(x)')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # Plot 3: PSD comparison (linear scale)
+    axes[1, 0].semilogy(freqs, true_psd, 'b-', linewidth=2, label='True Function PSD')
+    axes[1, 0].semilogy(freqs, train_psd, 'r--', linewidth=2, alpha=0.8, label='Training Data PSD')
+    axes[1, 0].set_title(f'Periodogram Comparison (Log Scale){title_suffix}')
+    axes[1, 0].set_xlabel('Frequency')
+    axes[1, 0].set_ylabel('PSD Magnitude')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+    
+    # Plot 4: PSD ratio to show discrepancies
+    # Avoid division by zero
+    psd_ratio = np.divide(train_psd, true_psd, out=np.ones_like(train_psd), where=true_psd!=0)
+    axes[1, 1].semilogy(freqs[1:], psd_ratio[1:], 'g-', linewidth=2)  # Skip DC component
+    axes[1, 1].axhline(y=1.0, color='black', linestyle='--', alpha=0.5, label='Perfect Match')
+    axes[1, 1].set_title(f'PSD Ratio (Training/True){title_suffix}')
+    axes[1, 1].set_xlabel('Frequency')
+    axes[1, 1].set_ylabel('Ratio (log scale)')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    # Add some statistics as text
+    mse_interp = np.mean((true_values_dense.cpu().numpy() - train_interp)**2)
+    psd_mse = np.mean((true_psd - train_psd)**2)
+    
+    fig.suptitle(f'Data Quality Check{title_suffix}\n'
+                f'Interpolation MSE: {mse_interp:.2e}, PSD MSE: {psd_mse:.2e}', 
+                fontsize=14)
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    
+    print(f"Data periodogram comparison saved to: {save_path}")
+    print(f"  Interpolation MSE: {mse_interp:.2e}")
+    print(f"  PSD MSE: {psd_mse:.2e}")
+
+
 def main():
     args = parse_args()
 
@@ -810,6 +939,10 @@ def main():
     # Parse k values from command line
     k_list = [float(k.strip()) for k in args.k_values.split(',')]
 
+    # Validate embedding requirements
+    if args.embedding in ["cheb", "bary"] and args.embedding_M is None:
+        raise ValueError(f"For '{args.embedding}' embedding you must specify --embedding_M > 0.")
+
     # Store results
     results = []
 
@@ -817,6 +950,7 @@ def main():
         f"Running wavenumber sweep for MLP: {args.n_layers} layers, {args.hidden_dim} hidden dim"
     )
     print(f"Target: {args.target}, Device: {args.device}, Optimizer: {args.optimizer}")
+    print(f"Embedding: {args.embedding}" + (f" (M={args.embedding_M})" if args.embedding_M else ""))
     print(f"Fixed 0th order points: {args.n_train_0th}, 1st order points: {args.n_train_1st}")
     print(f"Sweeping over wavenumbers: {k_list}")
 
@@ -849,9 +983,21 @@ def main():
             k=k,
         )
 
-        # Create model
+        # SANITY CHECK: Compare periodogram of training data vs evaluation data
+        print(f"Performing data quality check...")
+        plot_data_periodogram_comparison(
+            target,
+            os.path.join(args.save_dir, f"data_quality_check_k_{k}.png"),
+            title_suffix=f" (k={k})"
+        )
+
+        # Create model config with embedding parameters
         model_config = ModelConfig(
-            hidden_dim=args.hidden_dim, n_layers=args.n_layers, device=args.device
+            hidden_dim=args.hidden_dim, 
+            n_layers=args.n_layers, 
+            device=args.device,
+            embedding=args.embedding,
+            embedding_M=args.embedding_M,
         )
 
         # Train and evaluate using our new infrastructure
@@ -982,6 +1128,7 @@ def main():
     print("Files created:")
     print(f"  - k_sweep_results.json: All numerical results")
     print(f"  - k_sweep_l2re.png: L2RE vs k plot")
+    print(f"  - data_quality_check_k_*.png: Pre-training data quality analysis")
     print(f"  - weight_norms_k_*.png: Weight norm plots for each run")
     print(f"  - solution_k_*.png: Custom solution plots for each run")
     print(f"  - svd_*_k_*.png: Singular value plots for each layer and run")
