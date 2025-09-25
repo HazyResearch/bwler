@@ -64,6 +64,7 @@ def train_and_evaluate_model(
     max_error,
     l2_relative_error,
     weight_evals: List[Callable] = [],
+    custom_eval_epochs: List[int] = None,
 ) -> Tuple[float, float, float, float, torch.Tensor, torch.Tensor]:
     """
     Train and evaluate a model, returning metrics and predictions.
@@ -82,6 +83,7 @@ def train_and_evaluate_model(
         save_dir=exp_dir,
         logger=logger,
         weight_evals=weight_evals,
+        custom_eval_epochs=custom_eval_epochs,
     )
 
     # Check if training terminated early due to SSBroyden NaN and load checkpoint if available
@@ -136,6 +138,7 @@ def run_mlp_experiment(
     exp_dir: str,
     optimizer_name: str = "adam",
     weight_evals: List[Callable] = [],
+    custom_eval_epochs: List[int] = None,
 ) -> dict:
     """Run MLP experiment for a single architecture."""
     embedding_str = f"_embed_{config.embedding}"
@@ -183,6 +186,7 @@ def run_mlp_experiment(
         max_error,
         l2_relative_error,
         weight_evals,
+        custom_eval_epochs,
     )
 
     rmse_train, l_inf_train, rmse_test, l_inf_test, u_pred_train, u_pred_test = results

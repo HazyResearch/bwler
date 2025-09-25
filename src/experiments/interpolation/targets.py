@@ -4,7 +4,7 @@ Target function definitions for 1D interpolation experiments.
 
 import torch
 import numpy as np
-from typing import List, Callable
+from typing import List, Callable, Tuple
 import matplotlib.pyplot as plt
 import os
 from time import time
@@ -273,6 +273,7 @@ class SineTarget(BaseFcn):
         lr_schedule: bool = True,
         gradient_clip: float = 1.0,
         weight_evals: List[Callable] = [],
+        custom_eval_epochs: List[int] = None,
     ):
         """Train model using standard optimizers (Adam, SGD, etc.)."""
         if logger is None:
@@ -295,7 +296,7 @@ class SineTarget(BaseFcn):
         eval_nodes = eval_sampler()
         u_eval = model(eval_nodes)
         u_true = self.get_function(eval_nodes)
-        
+
         with torch.no_grad():
             for eval_metric in eval_metrics:
                 eval_metric_value = eval_metric(u_eval, u_true)
@@ -365,8 +366,14 @@ class SineTarget(BaseFcn):
             # Log loss
             logger.log("loss", loss.item(), epoch)
 
-            # Periodic evaluation
-            if (epoch + 1) % eval_every == 0:
+            # Periodic evaluation - use custom schedule if provided
+            should_evaluate = False
+            if custom_eval_epochs is not None:
+                should_evaluate = (epoch + 1) in custom_eval_epochs
+            else:
+                should_evaluate = (epoch + 1) % eval_every == 0
+
+            if should_evaluate:
                 # Save checkpoint
                 if save_dir is not None:
                     torch.save(
@@ -378,7 +385,7 @@ class SineTarget(BaseFcn):
                 eval_nodes = eval_sampler()
                 u_eval = model(eval_nodes)
                 u_true = self.get_function(eval_nodes)
-                
+
                 with torch.no_grad():
                     for eval_metric in eval_metrics:
                         eval_metric_value = eval_metric(u_eval, u_true)
@@ -491,6 +498,7 @@ class SineTarget(BaseFcn):
         save_dir: str = None,
         logger: Logger = None,
         weight_evals: List[Callable] = [],
+        custom_eval_epochs: List[int] = None,
     ):
         """Train model using SSBroyden optimizer."""
         if logger is None:
@@ -507,7 +515,7 @@ class SineTarget(BaseFcn):
         print("Running initial evaluation at epoch 0...")
         u_eval = model(eval_nodes)
         u_true = self.get_function(eval_nodes)
-        
+
         with torch.no_grad():
             for eval_metric in eval_metrics:
                 eval_metric_value = eval_metric(u_eval, u_true)
@@ -559,7 +567,7 @@ class SineTarget(BaseFcn):
                     print(
                         f"SSBroyden terminated due to NaN in rho_k_minus at epoch {epoch + 1}"
                     )
-                    
+
                     # Load the last valid checkpoint if available
                     if last_valid_checkpoint is not None and save_dir is not None:
                         checkpoint_path = os.path.join(save_dir, f"checkpoint_{last_valid_checkpoint}.pth")
@@ -576,7 +584,7 @@ class SineTarget(BaseFcn):
                     # Run final evaluation with loaded model
                     u_eval = model(eval_nodes)
                     u_true = self.get_function(eval_nodes)
-                    
+
                     with torch.no_grad():
                         for eval_metric in eval_metrics:
                             eval_metric_value = eval_metric(u_eval, u_true)
@@ -639,8 +647,14 @@ class SineTarget(BaseFcn):
             # Log loss
             logger.log("loss", loss.item(), epoch)
 
-            # Periodic evaluation
-            if (epoch + 1) % eval_every == 0:
+            # Periodic evaluation - use custom schedule if provided
+            should_evaluate = False
+            if custom_eval_epochs is not None:
+                should_evaluate = (epoch + 1) in custom_eval_epochs
+            else:
+                should_evaluate = (epoch + 1) % eval_every == 0
+
+            if should_evaluate:
                 # Save checkpoint
                 if save_dir is not None:
                     torch.save(
@@ -653,7 +667,7 @@ class SineTarget(BaseFcn):
                 # Evaluate solution
                 u_eval = model(eval_nodes)
                 u_true = self.get_function(eval_nodes)
-                
+
                 with torch.no_grad():
                     for eval_metric in eval_metrics:
                         eval_metric_value = eval_metric(u_eval, u_true)
@@ -769,6 +783,7 @@ class SineTarget(BaseFcn):
                 save_dir,
                 logger,
                 weight_evals,
+                **kwargs,
             )
         else:
             print(f"Using standard training for {optimizer_name}")
@@ -785,17 +800,172 @@ class SineTarget(BaseFcn):
                 lr_schedule,
                 gradient_clip,
                 weight_evals,
+                **kwargs,
             )
+
+
+class TwoHarmonicTarget(SineTarget):
+    """Two-harmonic target: sin(x) + sin(kx) with configurable frequency and built-in derivative supervision."""
+
+    def __init__(
+        self,
+        n_train_0th: int,  # number of points for value loss
+        n_train_1st: int,  # number of points for derivative loss
+        n_test: int = 1000,
+        domain: List[tuple] = [(-1, 1)],
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float64,
+        sampling: str = "uniform",
+        seed: int = None,
+        k: int = 1,  # sin(x) + sin(kx)
+        alpha: float = 1.0,  # weight for value loss
+        beta: float = 1.0,  # weight for derivative loss
+    ):
+        # Call parent constructor first
+        super().__init__(
+            n_train_0th=n_train_0th,
+            n_train_1st=n_train_1st,
+            n_test=n_test,
+            domain=domain,
+            device=device,
+            dtype=dtype,
+            sampling=sampling,
+            seed=seed,
+            k=k,
+            alpha=alpha,
+            beta=beta,
+        )
+
+        # Override name and functions for two-harmonic case
+        self.name = "two_harmonic"
+        self.f = lambda x: torch.sin(x) + torch.sin(self.k * x)
+        self.derivative = lambda x: torch.cos(x) + self.k * torch.cos(self.k * x)
+        self.second_derivative = lambda x: -torch.sin(x) - (self.k**2) * torch.sin(self.k * x)
+
+        # Recompute values with new functions
+        self._compute_values()
+
+
+class MultiBandTarget(SineTarget):
+    """Target with multiple frequency bands: sin(x) + sin(2kx) + sin(3kx) + ... + sin(num_bands*kx)"""
+
+    def __init__(
+        self,
+        n_train_0th: int,
+        n_train_1st: int,
+        n_test: int,
+        domain: List[Tuple[float, float]] = [(-1, 1)],
+        device: str = "cpu",
+        dtype=torch.float64,
+        sampling: str = "uniform",
+        seed: int = 0,
+        k: int = 1,  # base frequency multiplier
+        num_bands: int = 3,  # number of frequency bands
+        alpha: float = 1.0,  # weight for value loss
+        beta: float = 1.0,  # weight for derivative loss
+    ):
+        # Call parent constructor first
+        super().__init__(
+            n_train_0th=n_train_0th,
+            n_train_1st=n_train_1st,
+            n_test=n_test,
+            domain=domain,
+            device=device,
+            dtype=dtype,
+            sampling=sampling,
+            seed=seed,
+            k=k,
+            alpha=alpha,
+            beta=beta,
+        )
+
+        self.num_bands = num_bands
+
+        # Override name and functions for multi-band case
+        self.name = f"{num_bands}_band"
+
+        # Define frequency bands: sin(x) + sin(2kx) + sin(3kx) + ...
+        def multi_band_function(x):
+            result = torch.zeros_like(x)
+            # Add sin(x) as fundamental
+            result += torch.sin(x)
+            # Add harmonics: sin(2kx), sin(3kx), ..., sin(num_bands*kx)
+            for i in range(2, num_bands + 1):
+                result += torch.sin(i * self.k * x)
+            return result
+
+        def multi_band_derivative(x):
+            result = torch.zeros_like(x)
+            # Add cos(x) as fundamental derivative
+            result += torch.cos(x)
+            # Add harmonic derivatives: 2k*cos(2kx), 3k*cos(3kx), ...
+            for i in range(2, num_bands + 1):
+                result += (i * self.k) * torch.cos(i * self.k * x)
+            return result
+
+        def multi_band_second_derivative(x):
+            result = torch.zeros_like(x)
+            # Add -sin(x) as fundamental second derivative
+            result += -torch.sin(x)
+            # Add harmonic second derivatives: -(2k)^2*sin(2kx), -(3k)^2*sin(3kx), ...
+            for i in range(2, num_bands + 1):
+                result += -((i * self.k)**2) * torch.sin(i * self.k * x)
+            return result
+
+        self.f = multi_band_function
+        self.derivative = multi_band_derivative
+        self.second_derivative = multi_band_second_derivative
+
+        # Recompute values with new functions
+        self._compute_values()
 
 
 def create_target(config, **kwargs):
     """Factory function to create target based on configuration."""
-    if config.target_type == "sine":
+    # Check if num_bands is specified - if so, use MultiBandTarget regardless of target_type
+    num_bands = kwargs.get("num_bands", 1)
+
+    if num_bands > 1:
+        # Use MultiBandTarget for multi-band functionality
+        n_train_0th = kwargs.get("n_train_0th", config.n_train)
+        n_train_1st = kwargs.get("n_train_1st", config.n_train)
+
+        return MultiBandTarget(
+            n_train_0th=n_train_0th,
+            n_train_1st=n_train_1st,
+            n_test=config.n_test,
+            domain=[(-1, 1)],
+            device=config.device,
+            sampling=config.sampling,
+            seed=config.seed,
+            k=kwargs.get("k", 1),
+            num_bands=num_bands,
+            alpha=kwargs.get("deriv_alpha", 1.0),
+            beta=kwargs.get("deriv_beta", 1.0),
+        )
+    elif config.target_type == "sine":
         # Extract 0th and 1st order training point counts
         n_train_0th = kwargs.get("n_train_0th", config.n_train)
         n_train_1st = kwargs.get("n_train_1st", config.n_train)
 
         return SineTarget(
+            n_train_0th=n_train_0th,
+            n_train_1st=n_train_1st,
+            n_test=config.n_test,
+            domain=[(-1, 1)],
+            device=config.device,
+            sampling=config.sampling,
+            seed=config.seed,
+            k=kwargs.get("k", 1),
+            alpha=kwargs.get("deriv_alpha", 1.0),
+            beta=kwargs.get("deriv_beta", 1.0),
+        )
+    elif config.target_type == "two_harmonic":
+        # Extract 0th and 1st order training point counts
+        n_train_0th = kwargs.get("n_train_0th", config.n_train)
+        n_train_1st = kwargs.get("n_train_1st", config.n_train)
+
+        return TwoHarmonicTarget(
             n_train_0th=n_train_0th,
             n_train_1st=n_train_1st,
             n_test=config.n_test,

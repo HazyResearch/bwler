@@ -11,7 +11,7 @@ N_TRAIN_1ST=0    # points for derivative loss (typically 0 for k sweep)
 N_TEST=1000
 N_EPOCHS=10000
 EVAL_EVERY=1000
-SAVE_ROOT="/scr/biggest/junmiaoh/bwler/plots/interpolation"
+SAVE_ROOT="/scr/biggest/cdeng/bwler/plots/interpolation"
 DERIV_ALPHA=1.0
 DERIV_BETA=1.0
 
@@ -29,7 +29,7 @@ EMBEDDING_LIST=("none" "theta" "cheb" "bary")
 K_VALUES="1.0,2.0,4.0,8.0,16.0,32.0,64.0"
 
 # Create scripts directory if it doesn't exist
-mkdir -p /scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_k_sweeps
+mkdir -p /scr/biggest/cdeng/bwler/scripts/interpolation/mlp_size_k_sweeps
 
 # Function to generate sbatch script for a given optimizer and embedding
 generate_sbatch_script() {
@@ -80,8 +80,7 @@ generate_sbatch_script() {
     fi
     
     # Create the sbatch script
-    cat > "/scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_k_sweeps/mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}${EMBED_SUFFIX}_k_sweep.sbatch" << EOF
-
+    cat > "/scr/biggest/cdeng/bwler/scripts/interpolation/mlp_size_k_sweeps/mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}${EMBED_SUFFIX}_k_sweep.sbatch" << EOF
 #!/bin/bash
 #SBATCH --job-name=mlp_${CONFIG_NAME}_${OPTIMIZER_LOWER}${EMBED_SUFFIX}_k
 #SBATCH --time=${JOB_TIME}
@@ -100,7 +99,7 @@ export PYTHONUNBUFFERED=1
 export MPICH_GPU_SUPPORT_ENABLED=1
 
 # Navigate to project
-cd /scr/biggest/junmiaoh/bwler/
+cd /scr/biggest/cdeng/bwler/
 mkdir -p "${SAVE_DIR}"
 
 echo "Starting MLP ${CONFIG_NAME} wavenumber sweep with ${OPTIMIZER} and ${EMBEDDING} embedding"
@@ -185,7 +184,7 @@ for OPTIMIZER in "Adam" "SGD" "SSBroyden"; do
         
         echo ""
         echo "To submit all ${OPTIMIZER} jobs with ${EMBEDDING} embedding:"
-        echo "  cd /scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_k_sweeps"
+        echo "  cd /scr/biggest/cdeng/bwler/scripts/interpolation/mlp_size_k_sweeps"
         echo "  for script in mlp_*_${OPTIMIZER_LOWER}${EMBED_SUFFIX}_k_sweep.sbatch; do"
         echo "    sbatch \$script"
         echo "  done"
@@ -194,7 +193,7 @@ done
 
 echo ""
 echo "To submit ALL jobs at once:"
-echo "  cd /scr/biggest/junmiaoh/bwler/scripts/interpolation/mlp_size_k_sweeps"
+echo "  cd /scr/biggest/cdeng/bwler/scripts/interpolation/mlp_size_k_sweeps"
 echo "  for script in mlp_*_k_sweep.sbatch; do"
 echo "    sbatch \$script"
 echo "  done"
